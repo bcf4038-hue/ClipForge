@@ -1,0 +1,20 @@
+# Your private stuff: never goes to GitHub
+config.json
+cookies.txt
+usage.json
+.version
+
+# Working files and finished clips
+work/
+output/
+
+# Your own sounds (the folders stay, the files don't)
+sounds/my_sfx/*
+sounds/my_music/*
+!sounds/my_sfx/.keep
+!sounds/my_music/.keep
+
+# Python
+.venv/
+__pycache__/
+*.pyc

@@ -1,0 +1,329 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>ClipForge</title>
+<link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+<header>
+  <h1>ClipForge</h1>
+  <div class="row">
+    <button id="labBtn" class="ghost">Sound Lab</button>
+    <button id="spendBadge" class="ghost" title="Click for details"></button>
+    <button id="settingsBtn" class="ghost">Settings</button>
+  </div>
+</header>
+
+<section id="labPanel" class="panel hidden">
+  <h2>Sound Lab: make your own sound effects and music</h2>
+  <p class="muted small">Load a YouTube video or a file from your PC, cut out the sounds you want, and save them to your library. They show up as "(mine)" everywhere in ClipForge. Free: no AI, no cost.</p>
+  <div class="row">
+    <input id="labUrl" type="text" placeholder="YouTube link">
+    <button id="labLoadUrl">Load link</button>
+    <span class="muted">or</span>
+    <label class="upload">Upload video/audio<input id="labFile" type="file" accept="video/*,audio/*" hidden></label>
+  </div>
+  <div id="labProgress" class="progress hidden"><div class="bar"></div><span></span></div>
+
+  <div id="labWork" class="hidden">
+    <p><b id="labTitle"></b> <span class="muted" id="labDur"></span></p>
+    <canvas id="wave" height="120"></canvas>
+    <div class="row">
+      <button id="labPlay">Play</button>
+      <span id="labTime" class="muted">0:00.0</span>
+      <span class="muted small">Click the waveform to jump. Drag across it to select a sound.</span>
+    </div>
+
+    <h3>Cut one sound</h3>
+    <div class="row times">
+      <label>Start <input id="labStart" type="text" value="0:00.0"></label>
+      <button class="ghost tiny" id="labStartNow">Start = now</button>
+      <label>End <input id="labEnd" type="text" value="0:01.0"></label>
+      <button class="ghost tiny" id="labEndNow">End = now</button>
+      <button class="ghost" id="labPreviewSel">Play selection</button>
+      <button id="labAddSel">+ Add to list</button>
+    </div>
+
+    <h3>Or split a compilation automatically</h3>
+    <div class="grid">
+      <label>Sensitivity <span id="threshVal"></span>
+        <input id="thresh" type="range" min="-60" max="-15" value="-35">
+      </label>
+      <label>Gap between sounds <span id="gapVal"></span>
+        <input id="gap" type="range" min="5" max="150" value="30">
+      </label>
+    </div>
+    <p class="muted small">Too many tiny pieces? Move Sensitivity left or make the gap longer. Sounds merged together? Move Sensitivity right or make the gap shorter.</p>
+    <button class="ghost" id="labSplit">Find sounds</button>
+
+    <h3>Sounds to save</h3>
+    <div id="labList"><p class="muted small">Nothing yet. Cut a sound or click "Find sounds".</p></div>
+    <div class="row">
+      <label class="check"><input id="labNorm" type="checkbox" checked> Even out the volume</label>
+      <button id="labSave" class="big">Save checked sounds to my library</button>
+    </div>
+    <p id="labSaved" class="muted"></p>
+    <p class="muted small">Heads up: sounds and music taken from other people's videos can still trigger Content ID claims. Prefer channels that say their sounds are free to use.</p>
+  </div>
+</section>
+
+<section id="usagePanel" class="panel hidden">
+  <h2>AI spending</h2>
+  <p>Only the <b>Find clips</b> step costs money. Downloading, captions, Whisper and rendering are free. You are always asked before anything is charged.</p>
+  <div class="grid">
+    <label>My credit budget ($)
+      <input id="budget" type="text">
+    </label>
+  </div>
+  <div class="row"><button id="saveBudget">Save budget</button></div>
+  <p class="muted small">Set this to the credit you bought. ClipForge counts what it spends and warns you before you go over. It can't see your real balance, so check console.anthropic.com (Billing) now and then. ClipForge's numbers are close estimates; the Console is the official bill.</p>
+  <table id="usageTable"></table>
+</section>
+
+<div id="warnings"></div>
+
+<section id="settings" class="panel hidden">
+  <h2>Settings</h2>
+  <label>Anthropic API key <span id="keyHint" class="muted"></span>
+    <input id="apiKey" type="password" placeholder="sk-ant-...">
+  </label>
+  <p class="muted">Get one at console.anthropic.com. It is saved only on this computer, in config.json.</p>
+  <button id="saveKey">Save key</button>
+
+  <h3>YouTube sign-in</h3>
+  <p class="muted small">Only needed if you get "Sign in to confirm you're not a bot". ClipForge borrows your YouTube login from a browser on this PC. Be signed in to YouTube in that browser first.</p>
+  <div class="grid">
+    <label>Use login from
+      <select id="ytBrowser">
+        <option value="">Off</option>
+        <option value="firefox">Firefox (works best)</option>
+        <option value="chrome">Chrome</option>
+        <option value="edge">Edge</option>
+        <option value="brave">Brave</option>
+      </select>
+    </label>
+  </div>
+  <p class="muted small">Chrome, Edge and Brave often refuse to share their login on Windows. If they fail, use Firefox, or upload a cookies.txt file instead:</p>
+  <div class="row">
+    <label class="ghost upload">Upload cookies.txt<input id="cookieFile" type="file" accept=".txt" hidden></label>
+    <button class="ghost hidden" id="removeCookies">Remove cookies.txt</button>
+    <span id="cookieStatus" class="muted small"></span>
+  </div>
+</section>
+
+<section class="panel">
+  <h2>1. Paste a YouTube link or upload a video</h2>
+  <div class="row">
+    <input id="url" type="text" placeholder="https://www.youtube.com/watch?v=...">
+    <button id="analyzeBtn">Find clips</button>
+    <span class="muted">or</span>
+    <label class="upload">Upload a video file<input id="videoFile" type="file" accept="video/*" hidden></label>
+    <button class="ghost" id="montageBtn">Make a montage</button>
+  </div>
+  <div id="montagePanel" class="montage hidden">
+    <h3>Montage: join several short clips into one Short</h3>
+    <div class="grid">
+      <label>Format
+        <select id="montageFormat"><option value="plain">Plain montage</option><option value="top">Top list countdown (#5 to #1)</option></select>
+      </label>
+      <label id="topCountWrap" class="hidden">How many
+        <select id="topCount"><option value="3">Top 3</option><option value="5" selected>Top 5</option><option value="7">Top 7</option><option value="10">Top 10</option></select>
+      </label>
+      <label id="topTitleWrap" class="hidden" style="grid-column: span 2">Title on screen
+        <input id="topTitle" type="text" value="Top 5 craziest Roblox moments">
+      </label>
+    </div>
+    <p id="topHelp" class="muted small hidden">The list order is the ranking: the top row is #1. The video counts down and shows #1 last. Auto-pick ranks them for you. Give each clip an optional label.</p>
+    <div class="row">
+      <label class="upload">Add video clips<input id="montageFiles" type="file" accept="video/*" multiple hidden></label>
+      <span class="muted small">Add them in any order, then use the arrows. Trim each one so only the best part stays.</span>
+    </div>
+    <div class="row">
+      <input id="linkUrl" type="text" placeholder="Or paste a YouTube link" style="flex: 1; min-width: 220px">
+      <label class="check">From <input id="linkFrom" type="text" placeholder="0:00" style="width: 80px"></label>
+      <label class="check">To <input id="linkTo" type="text" placeholder="end" style="width: 80px"></label>
+      <button id="linkAdd">Add from link</button>
+    </div>
+    <p class="muted small">From/To are optional for videos under 20 minutes. For longer ones, type the part you want (like 12:30 to 13:10) so it only downloads that part.</p>
+    <div id="linkProgress" class="progress hidden"><div class="bar"></div><span></span></div>
+    <div id="montageList"></div>
+    <div class="row">
+      <label class="check">Target length
+        <select id="montageTarget"><option value="20">20s</option><option value="30" selected>30s</option><option value="45">45s</option><option value="60">60s</option></select>
+      </label>
+      <button id="montageAuto" class="ghost" disabled>Auto-pick best parts (free)</button>
+      <span id="montageAutoInfo" class="muted small"></span>
+    </div>
+    <video id="montagePreview" class="hidden" controls></video>
+    <div class="row">
+      <label class="check"><input id="montageWhoosh" type="checkbox" checked> Whoosh at every cut</label>
+      <span id="montageTotal" class="muted"></span>
+    </div>
+    <button id="montageBuild" class="big" disabled>Build montage</button>
+  </div>
+  <div class="grid">
+    <label>What kind of video?
+      <select id="mode">
+        <option value="talk">Talking: podcast, stream, commentary (AI picks, costs cents)</option>
+        <option value="hype">Gameplay: find hype moments by volume (free)</option>
+      </select>
+    </label>
+    <label id="clipLenWrap" class="hidden">Clip length
+      <select id="clipLen"><option value="15">15 seconds</option><option value="30" selected>30 seconds</option><option value="45">45 seconds</option><option value="60">60 seconds</option></select>
+    </label>
+  </div>
+  <label class="check"><input id="forceAi" type="checkbox"> Find clips again even if this video was analyzed before (Talking mode costs a few cents)</label>
+  <div id="analyzeProgress" class="progress hidden"><div class="bar"></div><span></span></div>
+</section>
+
+<div id="workspace" class="hidden">
+  <div class="layout">
+    <div class="left">
+      <section class="panel sticky">
+        <h2 id="videoTitle"></h2>
+        <p class="muted" id="videoMeta"></p>
+        <div id="playerWrap"><div id="player"></div></div>
+        <p class="muted small">Tip: pause the player, then use "Start = now" or "End = now" on a clip to trim it exactly.</p>
+      </section>
+
+      <section class="panel">
+        <h2>Style (applies to every clip)</h2>
+        <div class="grid">
+          <label>Font
+            <select id="font">
+              <option>Arial Black</option><option>Impact</option><option>Segoe UI Black</option><option>Arial</option><option>Verdana</option>
+            </select>
+          </label>
+          <label>Size <span id="sizeVal"></span>
+            <input id="size" type="range" min="50" max="140" value="90">
+          </label>
+          <label>Text color <input id="color" type="color" value="#ffffff"></label>
+          <label>Highlight color <input id="highlight" type="color" value="#ffe600"></label>
+          <label>Position
+            <select id="position"><option value="bottom">Lower third</option><option value="middle">Middle</option><option value="top">Top</option></select>
+          </label>
+          <label>Words on screen
+            <select id="wordsPerLine"><option>1</option><option>2</option><option selected>3</option><option>4</option><option>5</option></select>
+          </label>
+          <label class="check"><input id="uppercase" type="checkbox" checked> ALL CAPS</label>
+          <label class="check"><input id="pop" type="checkbox" checked> Pop animation</label>
+          <label>Framing
+            <select id="cropMode">
+              <option value="auto">Follow the face (auto)</option>
+              <option value="fit">Whole frame + blurred background</option>
+              <option value="center">Center</option><option value="left">Left side</option><option value="right">Right side</option>
+            </select>
+          </label>
+        </div>
+        <h3>Music</h3>
+        <div class="grid">
+          <label>Track <select id="music"></select></label>
+          <label>Volume <span id="musicVolVal"></span><input id="musicVol" type="range" min="0" max="60" value="15"></label>
+        </div>
+        <div class="row">
+          <button class="ghost" id="previewMusic">Play track</button>
+          <label class="ghost upload">Add my music<input type="file" accept="audio/*" multiple data-kind="music" hidden></label>
+          <label class="ghost upload">Add my sound effects<input type="file" accept="audio/*" multiple data-kind="sfx" hidden></label>
+        </div>
+        <p class="muted small">Your sounds go into the sounds/my_music and sounds/my_sfx folders. Use royalty-free files only: copyrighted songs get flagged by Content ID too.</p>
+      </section>
+    </div>
+
+    <div class="right">
+      <section class="panel">
+        <div class="row spread">
+          <h2>2. Pick your clips</h2>
+          <button class="ghost" id="addClip">+ Add my own clip</button>
+        </div>
+        <div id="clips"></div>
+      </section>
+
+      <section class="panel">
+        <h2>3. Render</h2>
+        <button id="renderBtn" class="big">Render approved clips</button>
+        <div id="renderProgress" class="progress hidden"><div class="bar"></div><span></span></div>
+        <div id="results"></div>
+      </section>
+    </div>
+  </div>
+</div>
+
+<template id="clipTpl">
+  <article class="clip">
+    <div class="row spread">
+      <label class="check approve"><input type="checkbox" class="approved"> <b>Use this clip</b></label>
+      <span class="score"></span>
+    </div>
+    <input class="title" type="text" placeholder="Clip title">
+    <p class="hook muted"></p>
+    <div class="row times">
+      <label>Start <input class="start" type="text"></label>
+      <button class="ghost tiny nudge" data-f="start" data-d="-0.5">-0.5s</button>
+      <button class="ghost tiny nudge" data-f="start" data-d="0.5">+0.5s</button>
+      <button class="ghost tiny setnow" data-f="start">Start = now</button>
+      <label>End <input class="end" type="text"></label>
+      <button class="ghost tiny nudge" data-f="end" data-d="-0.5">-0.5s</button>
+      <button class="ghost tiny nudge" data-f="end" data-d="0.5">+0.5s</button>
+      <button class="ghost tiny setnow" data-f="end">End = now</button>
+      <span class="len muted"></span>
+    </div>
+    <div class="row">
+      <button class="preview">Preview</button>
+      <button class="ghost editCaps">Edit captions</button>
+      <button class="ghost addSfx">+ Sound effect</button>
+      <button class="ghost addVo">+ AI voiceover</button>
+      <button class="ghost remove">Remove</button>
+    </div>
+    <div class="capsBox hidden">
+      <textarea class="caps" rows="4"></textarea>
+      <p class="muted small">Fix wrong words here. Timing is kept automatically. <a href="#" class="resetCaps">Reset to transcript</a></p>
+    </div>
+    <div class="sfxList"></div>
+    <div class="voBox hidden">
+      <h3>AI voiceover</h3>
+      <textarea class="voText" rows="3" placeholder="Type what the voice should say, or let Claude write it below."></textarea>
+      <div class="grid">
+        <label>Voice <select class="voVoice"></select></label>
+        <label>Speed
+          <select class="voRate"><option value="-10%">Slower</option><option value="+0%">Normal</option><option value="+10%" selected>A bit faster</option><option value="+20%">Fast</option></select>
+        </label>
+        <label>Starts at (seconds) <input class="voAt" type="text" value="0"></label>
+        <label>Captions show
+          <select class="voCaps"><option value="voice">The AI voice</option><option value="speech">What's said in the video</option></select>
+        </label>
+      </div>
+      <div class="row">
+        <button class="ghost voPreview">Hear it</button>
+        <span class="voInfo muted small"></span>
+      </div>
+      <div class="row">
+        <select class="voStyle">
+          <option value="hype">Hype commentary</option><option value="funny">Funny</option>
+          <option value="story">Storytelling</option><option value="facts">Explainer</option>
+        </select>
+        <input class="voNotes" type="text" placeholder="Optional notes for Claude, e.g. 'he clutches a 1v3 at the end'">
+        <button class="voWrite">Write it with AI</button>
+      </div>
+      <div class="progress voProgress hidden"><div class="bar"></div><span></span></div>
+      <p class="muted small">Writing with AI shows the cost first (usually about 1 to 3 cents) and waits for your OK. Typing it yourself is free.</p>
+    </div>
+  </article>
+</template>
+
+<div id="approvalBackdrop" class="backdrop hidden">
+  <div id="approval" class="approval">
+    <h3>Approve this charge?</h3>
+    <p id="approvalWhat" class="muted"></p>
+    <div id="approvalText"></div>
+    <div class="row">
+      <button id="approveYes">Yes, spend it</button>
+      <button id="approveNo" class="ghost">Cancel (free)</button>
+    </div>
+  </div>
+</div>
+
+<script src="/static/app.js"></script>
+</body>
+</html>
