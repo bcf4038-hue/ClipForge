@@ -930,7 +930,7 @@ function tlRows() {
     const row = document.createElement("div");
     row.className = "tlRow";
     row.innerHTML = `<span class="tlRank">#${i + 1}</span>
-      <input class="tlUrl" type="text" placeholder="YouTube or TikTok link" aria-label="Link for #${i + 1}">
+      <input class="tlUrl" type="text" placeholder="YouTube, TikTok or Instagram link" aria-label="Link for #${i + 1}">
       <input class="tlLabel" type="text" placeholder="Label (optional)" aria-label="Label for #${i + 1}">
       <span class="tlTimes"><input class="tlFrom" type="text" placeholder="From" aria-label="From"><input class="tlTo" type="text" placeholder="To" aria-label="To"></span>
       <span class="tlStatus"></span>`;

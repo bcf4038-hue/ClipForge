@@ -29,8 +29,8 @@
   <p class="muted">Get one at console.anthropic.com. It is saved only on this computer, in config.json.</p>
   <button id="saveKey">Save key</button>
 
-  <h3>YouTube sign-in</h3>
-  <p class="muted small">Only needed if you get "Sign in to confirm you're not a bot". ClipForge borrows your YouTube login from a browser on this PC. Be signed in to YouTube in that browser first.</p>
+  <h3>Sign-in for downloads</h3>
+  <p class="muted small">Needed for most Instagram links, and for YouTube if you get "Sign in to confirm you're not a bot". ClipForge borrows your logins from a browser on this PC, so be logged in to Instagram and YouTube in that browser first.</p>
   <div class="grid">
     <label>Use login from
       <select id="ytBrowser">
@@ -99,7 +99,7 @@
 <section id="view-toplinks" class="view hidden">
   <div class="panel">
     <h2>Top List from Links</h2>
-    <p class="muted">Paste a YouTube or TikTok link for each spot. ClipForge downloads them, keeps the best few seconds of each, and builds the countdown. #1 plays last.</p>
+    <p class="muted">Paste a YouTube, TikTok or Instagram link for each spot. ClipForge downloads them, keeps the best few seconds of each, and builds the countdown. #1 plays last.</p>
     <div class="grid">
       <label style="grid-column: span 2">Title on screen
         <input id="tlTitle" type="text" value="Top 5 craziest Roblox moments">
@@ -124,7 +124,7 @@
     </div>
     <button id="tlGo" class="big">Make my Top 5</button>
     <div id="tlProgress" class="progress hidden"><div class="bar"></div><span></span></div>
-    <p class="muted small">Long videos (over 20 minutes) need a From and To time. Downloaded TikToks can include TikTok's watermark.</p>
+    <p class="muted small">Long videos (over 20 minutes) need a From and To time. Downloaded TikToks can include TikTok's watermark. Instagram links usually need Settings > Sign-in for downloads.</p>
   </div>
 </section>
 
@@ -177,7 +177,7 @@
       <span class="muted small">Add them in any order, then use the arrows. Trim each one so only the best part stays.</span>
     </div>
     <div class="row">
-      <input id="linkUrl" type="text" placeholder="Or paste a YouTube link" style="flex: 1; min-width: 220px">
+      <input id="linkUrl" type="text" placeholder="Or paste a YouTube, TikTok or Instagram link" style="flex: 1; min-width: 220px">
       <label class="check">From <input id="linkFrom" type="text" placeholder="0:00" style="width: 80px"></label>
       <label class="check">To <input id="linkTo" type="text" placeholder="end" style="width: 80px"></label>
       <button id="linkAdd">Add from link</button>

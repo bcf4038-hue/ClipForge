@@ -23,7 +23,7 @@ _impersonate = None  # cached: the "pretend to be Chrome" option, or {} if unava
 
 
 def _impersonate_opts():
-    """TikTok blocks plain downloaders; yt-dlp can pose as Chrome if curl-cffi is installed."""
+    """TikTok and Instagram block plain downloaders; yt-dlp can pose as Chrome if curl-cffi is installed."""
     global _impersonate
     if _impersonate is None:
         try:
@@ -39,7 +39,7 @@ def _impersonate_opts():
 
 def _base_opts(url=None):
     opts = {"quiet": True, "no_warnings": True, "noplaylist": True, "noprogress": True, **_auth}
-    if url and "tiktok.com" in url:
+    if url and ("tiktok.com" in url or "instagram.com" in url):
         opts.update(_impersonate_opts())
     return opts
 

@@ -534,6 +534,10 @@ def fetch_link(update, url, start, end):
         path = (youtube.download_section(url, float(start or 0), float(end), base) if has_range
                 else youtube.download_video(url, base))
     except Exception as e:
+        if "instagram.com" in url:
+            raise RuntimeError("Instagram blocked this download. It usually needs you to be logged in: open "
+                               "Settings, and under \"Sign-in for downloads\" pick the browser where you're logged "
+                               "in to Instagram (Firefox works best), then try again. Details: " + str(e)[:200]) from e
         if "tiktok.com" in url:
             raise RuntimeError("TikTok blocked this download. Wait a minute and try again. If it keeps failing, "
                                "close ClipForge and open start.bat again (it updates the downloader), or try "
