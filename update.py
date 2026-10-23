@@ -77,7 +77,7 @@ def main():
         print(f"  Couldn't check for updates ({e.__class__.__name__}). Starting the current version.")
     # These break when YouTube/Microsoft change things, so keep them fresh every start.
     print("  Checking the YouTube downloader and voice tool...")
-    subprocess.run([sys.executable, "-m", "pip", "install", "-q", "-U", "yt-dlp[default]", "edge-tts"])
+    subprocess.run([sys.executable, "-m", "pip", "install", "-q", "-U", "yt-dlp[default,curl-cffi]", "edge-tts"])
 
 
 if __name__ == "__main__":

@@ -4,20 +4,208 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>ClipForge</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bungee&family=Inter:wght@400;600;800&display=swap">
 <link rel="stylesheet" href="/static/style.css">
 </head>
 <body>
-<header>
-  <h1>ClipForge</h1>
-  <div class="row">
-    <button id="labBtn" class="ghost">Sound Lab</button>
-    <button id="spendBadge" class="ghost" title="Click for details"></button>
+<header class="topbar">
+  <button id="homeBtn" class="logo" aria-label="ClipForge home"><span class="o">CLIP</span><span class="t">FORGE</span></button>
+  <nav class="row">
+    <button id="editorBtn" class="ghost hidden">Back to editor</button>
+    <button id="spendBadge" class="chip" title="Click for details"></button>
     <button id="settingsBtn" class="ghost">Settings</button>
-  </div>
+  </nav>
 </header>
 
-<section id="labPanel" class="panel hidden">
-  <h2>Sound Lab: make your own sound effects and music</h2>
+<main>
+<div id="warnings"></div>
+
+<section id="settings" class="panel hidden">
+  <h2>Settings</h2>
+  <label>Anthropic API key <span id="keyHint" class="muted"></span>
+    <input id="apiKey" type="password" placeholder="sk-ant-...">
+  </label>
+  <p class="muted">Get one at console.anthropic.com. It is saved only on this computer, in config.json.</p>
+  <button id="saveKey">Save key</button>
+
+  <h3>YouTube sign-in</h3>
+  <p class="muted small">Only needed if you get "Sign in to confirm you're not a bot". ClipForge borrows your YouTube login from a browser on this PC. Be signed in to YouTube in that browser first.</p>
+  <div class="grid">
+    <label>Use login from
+      <select id="ytBrowser">
+        <option value="">Off</option>
+        <option value="firefox">Firefox (works best)</option>
+        <option value="chrome">Chrome</option>
+        <option value="edge">Edge</option>
+        <option value="brave">Brave</option>
+      </select>
+    </label>
+  </div>
+  <p class="muted small">Chrome, Edge and Brave often refuse to share their login on Windows. If they fail, use Firefox, or upload a cookies.txt file instead:</p>
+  <div class="row">
+    <label class="ghost upload">Upload cookies.txt<input id="cookieFile" type="file" accept=".txt" hidden></label>
+    <button class="ghost hidden" id="removeCookies">Remove cookies.txt</button>
+    <span id="cookieStatus" class="muted small"></span>
+  </div>
+</section>
+
+<section id="usagePanel" class="panel hidden">
+  <h2>AI spending</h2>
+  <p>Only the <b>Find clips</b> step costs money. Downloading, captions, Whisper and rendering are free. You are always asked before anything is charged.</p>
+  <div class="grid">
+    <label>My credit budget ($)
+      <input id="budget" type="text">
+    </label>
+  </div>
+  <div class="row"><button id="saveBudget">Save budget</button></div>
+  <p class="muted small">Set this to the credit you bought. ClipForge counts what it spends and warns you before you go over. It can't see your real balance, so check console.anthropic.com (Billing) now and then. ClipForge's numbers are close estimates; the Console is the official bill.</p>
+  <table id="usageTable"></table>
+</section>
+
+<section id="view-home" class="view">
+  <div class="hero">
+    <h1>What are we making today?</h1>
+    <p class="muted">Pick a tool. You can always come back here with the ClipForge logo.</p>
+  </div>
+  <div class="tiles">
+    <button class="tile" data-view="toplinks">
+      <span class="tile-icon o"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M8 21h8M12 17v4M7 4h10v5a5 5 0 0 1-10 0V4zM7 6H4a3 3 0 0 0 3 4M17 6h3a3 3 0 0 1-3 4"/></svg></span>
+      <span class="tile-title">Top List from Links</span>
+      <span class="tile-text">Paste 5 links, get a Top 5 countdown with rank numbers and a title.</span>
+      <span class="tag free">Free</span>
+    </button>
+    <button class="tile" data-view="long">
+      <span class="tile-icon t"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="5" width="18" height="14" rx="2"/><path d="M10 9l5 3-5 3z"/></svg></span>
+      <span class="tile-title">Clips from a Long Video</span>
+      <span class="tile-text">Podcasts, streams or gameplay. Finds the best moments for you.</span>
+      <span class="tag">Gameplay free, talking costs cents</span>
+    </button>
+    <button class="tile" data-view="montage">
+      <span class="tile-icon o"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="4" width="7" height="7" rx="1"/><rect x="14" y="4" width="7" height="7" rx="1"/><rect x="3" y="13" width="7" height="7" rx="1"/><rect x="14" y="13" width="7" height="7" rx="1"/></svg></span>
+      <span class="tile-title">Montage</span>
+      <span class="tile-text">Join your own clips or links. Auto-picks the best part of each.</span>
+      <span class="tag free">Free</span>
+    </button>
+    <button class="tile" data-view="lab">
+      <span class="tile-icon t"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 12h2M7 8v8M11 5v14M15 9v6M19 11v2M21 12h0"/></svg></span>
+      <span class="tile-title">Sound Lab</span>
+      <span class="tile-text">Cut sound effects and music out of any video for your library.</span>
+      <span class="tag free">Free</span>
+    </button>
+  </div>
+</section>
+
+<section id="view-toplinks" class="view hidden">
+  <div class="panel">
+    <h2>Top List from Links</h2>
+    <p class="muted">Paste a YouTube or TikTok link for each spot. ClipForge downloads them, keeps the best few seconds of each, and builds the countdown. #1 plays last.</p>
+    <div class="grid">
+      <label style="grid-column: span 2">Title on screen
+        <input id="tlTitle" type="text" value="Top 5 craziest Roblox moments">
+      </label>
+      <label>How many
+        <select id="tlCount"><option value="3">Top 3</option><option value="5" selected>Top 5</option><option value="7">Top 7</option><option value="10">Top 10</option></select>
+      </label>
+      <label>Seconds per clip
+        <select id="tlSeconds"><option value="4">4s</option><option value="6" selected>6s</option><option value="8">8s</option><option value="10">10s</option></select>
+      </label>
+      <label style="grid-column: span 2">Ranking
+        <select id="tlRank">
+          <option value="mine">I'll rank them: the #1 box is the best</option>
+          <option value="auto">Let ClipForge rank them (most action = #1)</option>
+        </select>
+      </label>
+    </div>
+    <div id="tlRows"></div>
+    <div class="row">
+      <label class="check"><input id="tlWhoosh" type="checkbox" checked> Whoosh between clips</label>
+      <span id="tlTotal" class="muted"></span>
+    </div>
+    <button id="tlGo" class="big">Make my Top 5</button>
+    <div id="tlProgress" class="progress hidden"><div class="bar"></div><span></span></div>
+    <p class="muted small">Long videos (over 20 minutes) need a From and To time. Downloaded TikToks can include TikTok's watermark.</p>
+  </div>
+</section>
+
+<section id="view-long" class="view hidden">
+  <section class="panel">
+  <h2>Clips from a long video</h2>
+  <p class="muted">Paste a podcast, stream or gameplay link (or upload a file). ClipForge finds the best moments.</p>
+  <div class="row">
+    <input id="url" type="text" placeholder="https://www.youtube.com/watch?v=...">
+    <button id="analyzeBtn">Find clips</button>
+    <span class="muted">or</span>
+    <label class="upload">Upload a video file<input id="videoFile" type="file" accept="video/*" hidden></label>
+  </div>
+  
+  <div class="grid">
+    <label>What kind of video?
+      <select id="mode">
+        <option value="talk">Talking: podcast, stream, commentary (AI picks, costs cents)</option>
+        <option value="hype">Gameplay: find hype moments by volume (free)</option>
+      </select>
+    </label>
+    <label id="clipLenWrap" class="hidden">Clip length
+      <select id="clipLen"><option value="15">15 seconds</option><option value="30" selected>30 seconds</option><option value="45">45 seconds</option><option value="60">60 seconds</option></select>
+    </label>
+  </div>
+  <label class="check"><input id="forceAi" type="checkbox"> Find clips again even if this video was analyzed before (Talking mode costs a few cents)</label>
+  <div id="analyzeProgress" class="progress hidden"><div class="bar"></div><span></span></div>
+</section>
+</section>
+
+<section id="view-montage" class="view hidden">
+  <div class="panel">
+    <div id="montagePanel">
+    <h2>Montage</h2>
+    <p class="muted">Join your own clips or links into one Short. Plain montage, or a top list countdown.</p>
+    <div class="grid">
+      <label>Format
+        <select id="montageFormat"><option value="plain">Plain montage</option><option value="top">Top list countdown (#5 to #1)</option></select>
+      </label>
+      <label id="topCountWrap" class="hidden">How many
+        <select id="topCount"><option value="3">Top 3</option><option value="5" selected>Top 5</option><option value="7">Top 7</option><option value="10">Top 10</option></select>
+      </label>
+      <label id="topTitleWrap" class="hidden" style="grid-column: span 2">Title on screen
+        <input id="topTitle" type="text" value="Top 5 craziest Roblox moments">
+      </label>
+    </div>
+    <p id="topHelp" class="muted small hidden">The list order is the ranking: the top row is #1. The video counts down and shows #1 last. Auto-pick ranks them for you. Give each clip an optional label.</p>
+    <div class="row">
+      <label class="upload">Add video clips<input id="montageFiles" type="file" accept="video/*" multiple hidden></label>
+      <span class="muted small">Add them in any order, then use the arrows. Trim each one so only the best part stays.</span>
+    </div>
+    <div class="row">
+      <input id="linkUrl" type="text" placeholder="Or paste a YouTube link" style="flex: 1; min-width: 220px">
+      <label class="check">From <input id="linkFrom" type="text" placeholder="0:00" style="width: 80px"></label>
+      <label class="check">To <input id="linkTo" type="text" placeholder="end" style="width: 80px"></label>
+      <button id="linkAdd">Add from link</button>
+    </div>
+    <p class="muted small">From/To are optional for videos under 20 minutes. For longer ones, type the part you want (like 12:30 to 13:10) so it only downloads that part.</p>
+    <div id="linkProgress" class="progress hidden"><div class="bar"></div><span></span></div>
+    <div id="montageList"></div>
+    <div class="row">
+      <label class="check">Target length
+        <select id="montageTarget"><option value="20">20s</option><option value="30" selected>30s</option><option value="45">45s</option><option value="60">60s</option></select>
+      </label>
+      <button id="montageAuto" class="ghost" disabled>Auto-pick best parts (free)</button>
+      <span id="montageAutoInfo" class="muted small"></span>
+    </div>
+    <video id="montagePreview" class="hidden" controls></video>
+    <div class="row">
+      <label class="check"><input id="montageWhoosh" type="checkbox" checked> Whoosh at every cut</label>
+      <span id="montageTotal" class="muted"></span>
+    </div>
+    <button id="montageBuild" class="big" disabled>Build montage</button>
+  </div>
+    <div id="montageProgress" class="progress hidden"><div class="bar"></div><span></span></div>
+  </div>
+</section>
+
+<section id="view-lab" class="view hidden">
+  <section id="labPanel" class="panel">
+  <h2>Sound Lab</h2>
   <p class="muted small">Load a YouTube video or a file from your PC, cut out the sounds you want, and save them to your library. They show up as "(mine)" everywhere in ClipForge. Free: no AI, no cost.</p>
   <div class="row">
     <input id="labUrl" type="text" placeholder="YouTube link">
@@ -68,117 +256,9 @@
     <p class="muted small">Heads up: sounds and music taken from other people's videos can still trigger Content ID claims. Prefer channels that say their sounds are free to use.</p>
   </div>
 </section>
-
-<section id="usagePanel" class="panel hidden">
-  <h2>AI spending</h2>
-  <p>Only the <b>Find clips</b> step costs money. Downloading, captions, Whisper and rendering are free. You are always asked before anything is charged.</p>
-  <div class="grid">
-    <label>My credit budget ($)
-      <input id="budget" type="text">
-    </label>
-  </div>
-  <div class="row"><button id="saveBudget">Save budget</button></div>
-  <p class="muted small">Set this to the credit you bought. ClipForge counts what it spends and warns you before you go over. It can't see your real balance, so check console.anthropic.com (Billing) now and then. ClipForge's numbers are close estimates; the Console is the official bill.</p>
-  <table id="usageTable"></table>
 </section>
 
-<div id="warnings"></div>
-
-<section id="settings" class="panel hidden">
-  <h2>Settings</h2>
-  <label>Anthropic API key <span id="keyHint" class="muted"></span>
-    <input id="apiKey" type="password" placeholder="sk-ant-...">
-  </label>
-  <p class="muted">Get one at console.anthropic.com. It is saved only on this computer, in config.json.</p>
-  <button id="saveKey">Save key</button>
-
-  <h3>YouTube sign-in</h3>
-  <p class="muted small">Only needed if you get "Sign in to confirm you're not a bot". ClipForge borrows your YouTube login from a browser on this PC. Be signed in to YouTube in that browser first.</p>
-  <div class="grid">
-    <label>Use login from
-      <select id="ytBrowser">
-        <option value="">Off</option>
-        <option value="firefox">Firefox (works best)</option>
-        <option value="chrome">Chrome</option>
-        <option value="edge">Edge</option>
-        <option value="brave">Brave</option>
-      </select>
-    </label>
-  </div>
-  <p class="muted small">Chrome, Edge and Brave often refuse to share their login on Windows. If they fail, use Firefox, or upload a cookies.txt file instead:</p>
-  <div class="row">
-    <label class="ghost upload">Upload cookies.txt<input id="cookieFile" type="file" accept=".txt" hidden></label>
-    <button class="ghost hidden" id="removeCookies">Remove cookies.txt</button>
-    <span id="cookieStatus" class="muted small"></span>
-  </div>
-</section>
-
-<section class="panel">
-  <h2>1. Paste a YouTube link or upload a video</h2>
-  <div class="row">
-    <input id="url" type="text" placeholder="https://www.youtube.com/watch?v=...">
-    <button id="analyzeBtn">Find clips</button>
-    <span class="muted">or</span>
-    <label class="upload">Upload a video file<input id="videoFile" type="file" accept="video/*" hidden></label>
-    <button class="ghost" id="montageBtn">Make a montage</button>
-  </div>
-  <div id="montagePanel" class="montage hidden">
-    <h3>Montage: join several short clips into one Short</h3>
-    <div class="grid">
-      <label>Format
-        <select id="montageFormat"><option value="plain">Plain montage</option><option value="top">Top list countdown (#5 to #1)</option></select>
-      </label>
-      <label id="topCountWrap" class="hidden">How many
-        <select id="topCount"><option value="3">Top 3</option><option value="5" selected>Top 5</option><option value="7">Top 7</option><option value="10">Top 10</option></select>
-      </label>
-      <label id="topTitleWrap" class="hidden" style="grid-column: span 2">Title on screen
-        <input id="topTitle" type="text" value="Top 5 craziest Roblox moments">
-      </label>
-    </div>
-    <p id="topHelp" class="muted small hidden">The list order is the ranking: the top row is #1. The video counts down and shows #1 last. Auto-pick ranks them for you. Give each clip an optional label.</p>
-    <div class="row">
-      <label class="upload">Add video clips<input id="montageFiles" type="file" accept="video/*" multiple hidden></label>
-      <span class="muted small">Add them in any order, then use the arrows. Trim each one so only the best part stays.</span>
-    </div>
-    <div class="row">
-      <input id="linkUrl" type="text" placeholder="Or paste a YouTube link" style="flex: 1; min-width: 220px">
-      <label class="check">From <input id="linkFrom" type="text" placeholder="0:00" style="width: 80px"></label>
-      <label class="check">To <input id="linkTo" type="text" placeholder="end" style="width: 80px"></label>
-      <button id="linkAdd">Add from link</button>
-    </div>
-    <p class="muted small">From/To are optional for videos under 20 minutes. For longer ones, type the part you want (like 12:30 to 13:10) so it only downloads that part.</p>
-    <div id="linkProgress" class="progress hidden"><div class="bar"></div><span></span></div>
-    <div id="montageList"></div>
-    <div class="row">
-      <label class="check">Target length
-        <select id="montageTarget"><option value="20">20s</option><option value="30" selected>30s</option><option value="45">45s</option><option value="60">60s</option></select>
-      </label>
-      <button id="montageAuto" class="ghost" disabled>Auto-pick best parts (free)</button>
-      <span id="montageAutoInfo" class="muted small"></span>
-    </div>
-    <video id="montagePreview" class="hidden" controls></video>
-    <div class="row">
-      <label class="check"><input id="montageWhoosh" type="checkbox" checked> Whoosh at every cut</label>
-      <span id="montageTotal" class="muted"></span>
-    </div>
-    <button id="montageBuild" class="big" disabled>Build montage</button>
-  </div>
-  <div class="grid">
-    <label>What kind of video?
-      <select id="mode">
-        <option value="talk">Talking: podcast, stream, commentary (AI picks, costs cents)</option>
-        <option value="hype">Gameplay: find hype moments by volume (free)</option>
-      </select>
-    </label>
-    <label id="clipLenWrap" class="hidden">Clip length
-      <select id="clipLen"><option value="15">15 seconds</option><option value="30" selected>30 seconds</option><option value="45">45 seconds</option><option value="60">60 seconds</option></select>
-    </label>
-  </div>
-  <label class="check"><input id="forceAi" type="checkbox"> Find clips again even if this video was analyzed before (Talking mode costs a few cents)</label>
-  <div id="analyzeProgress" class="progress hidden"><div class="bar"></div><span></span></div>
-</section>
-
-<div id="workspace" class="hidden">
+<div id="workspace" class="view hidden">
   <div class="layout">
     <div class="left">
       <section class="panel sticky">
@@ -249,6 +329,7 @@
     </div>
   </div>
 </div>
+</main>
 
 <template id="clipTpl">
   <article class="clip">

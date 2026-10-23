@@ -530,8 +530,15 @@ def fetch_link(update, url, start, end):
     os.makedirs(LINKS, exist_ok=True)
     base = os.path.join(LINKS, part_id)
     update(0.2, "Downloading the part you picked..." if has_range else "Downloading the video...")
-    path = (youtube.download_section(url, float(start or 0), float(end), base) if has_range
-            else youtube.download_video(url, base))
+    try:
+        path = (youtube.download_section(url, float(start or 0), float(end), base) if has_range
+                else youtube.download_video(url, base))
+    except Exception as e:
+        if "tiktok.com" in url:
+            raise RuntimeError("TikTok blocked this download. Wait a minute and try again. If it keeps failing, "
+                               "close ClipForge and open start.bat again (it updates the downloader), or try "
+                               "the link from TikTok's Share > Copy link. Details: " + str(e)[:200]) from e
+        raise
     real = render.probe(path, FFPROBE)[2]
     return {"id": part_id, "title": info.get("title") or url, "duration": real,
             "media": f"/linkpart/{os.path.basename(path)}"}

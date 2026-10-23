@@ -18,6 +18,14 @@ UPDATES
 start.bat checks GitHub for a new version every time you open it and installs it
 automatically. Your settings, API key, sounds, clips and history are never touched.
 
+TOP LIST FROM LINKS (fastest way to a Top 5)
+--------------------------------------------
+On the home screen click "Top List from Links". Pick Top 3/5/7/10, type the title,
+paste a YouTube or TikTok link in each box (add a label if you like), choose who
+ranks them, and click "Make my Top 5". ClipForge downloads each video, keeps the
+best few seconds, builds the countdown (#1 last) and opens the editor. Pick music
+and a style, then Render.
+
 EVERY TIME YOU USE IT
 ---------------------
 (Campaign gave you video files, e.g. on Google Drive? Download them, then use

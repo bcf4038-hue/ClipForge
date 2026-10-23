@@ -435,7 +435,7 @@ function openProject(project, prog) {
   const src = { "youtube-auto": "YouTube auto captions", "youtube-manual": "YouTube captions", whisper: "Whisper", none: "none (no speech found)" }[project.caption_source];
   const how = project.mode === "hype" ? "hype moments found" : "clips suggested";
   $("#videoMeta").textContent = `${fmt(project.duration || 0)} long, transcript: ${src}, ${project.clips.length} ${how}`;
-  $("#workspace").classList.remove("hidden");
+  showView("editor");
   setProgress(prog, 1, "Done. Review the clips below.");
   renderClips();
   setupPlayer(project.video_id);
@@ -465,7 +465,6 @@ $("#videoFile").onchange = async () => {
 
 // ---------- montage ----------
 const montage = { items: [] };
-$("#montageBtn").onclick = () => $("#montagePanel").classList.toggle("hidden");
 $("#montageFiles").onchange = () => {
   [...$("#montageFiles").files].forEach((file) => {
     const item = { file, name: file.name, url: URL.createObjectURL(file), start: 0, end: null, duration: null };
@@ -603,7 +602,7 @@ $("#montageAuto").onclick = async () => {
   }
 };
 $("#montageBuild").onclick = async () => {
-  const prog = $("#analyzeProgress");
+  const prog = $("#montageProgress");
   const form = new FormData();
   let parts = montage.items.map((it) => ({ it, rank: null }));
   if (isTop()) {
@@ -623,7 +622,6 @@ $("#montageBuild").onclick = async () => {
     if (!res.ok) throw new Error(data.error || `Upload failed (${res.status})`);
     openProject(await waitJob(data.job, prog), prog);
     setProgress(prog, 1, "Montage ready. Add a voiceover on the clip below, then Render.");
-    $("#montagePanel").classList.add("hidden");
   } catch (e) {
     setProgress(prog, 0, errText(e.message));
   } finally {
@@ -697,7 +695,6 @@ $("#renderBtn").onclick = async () => {
 
 // ---------- sound lab ----------
 const lab = { source: null, audio: new Audio(), items: [], sel: { start: 0, end: 1 }, stopAt: null, drag: null };
-$("#labBtn").onclick = () => $("#labPanel").classList.toggle("hidden");
 
 async function labLoad(form) {
   const prog = $("#labProgress");
@@ -905,6 +902,122 @@ $("#labSave").onclick = async () => {
 };
 
 $("#mode").onchange = () => $("#clipLenWrap").classList.toggle("hidden", $("#mode").value !== "hype");
+
+// ---------- screens ----------
+const VIEWS = ["home", "toplinks", "long", "montage", "lab"];
+function showView(name) {
+  VIEWS.forEach((v) => $(`#view-${v}`).classList.toggle("hidden", v !== name));
+  $("#workspace").classList.toggle("hidden", name !== "editor");
+  $("#editorBtn").classList.toggle("hidden", !state.project || name === "editor");
+  window.scrollTo(0, 0);
+  if (name === "lab") drawWave();
+}
+document.querySelectorAll(".tile").forEach((t) => { t.onclick = () => showView(t.dataset.view); });
+$("#homeBtn").onclick = () => showView("home");
+$("#editorBtn").onclick = () => showView("editor");
+
+// ---------- Top List from Links ----------
+const tl = { cache: {} };  // "url|from|to" -> downloaded clip, so a retry skips finished downloads
+function tlRows() {
+  const n = Number($("#tlCount").value);
+  const old = [...document.querySelectorAll(".tlRow")].map((r) => ({
+    url: $(".tlUrl", r).value, label: $(".tlLabel", r).value, from: $(".tlFrom", r).value, to: $(".tlTo", r).value,
+  }));
+  const box = $("#tlRows");
+  box.innerHTML = "";
+  for (let i = 0; i < n; i++) {
+    const v = old[i] || { url: "", label: "", from: "", to: "" };
+    const row = document.createElement("div");
+    row.className = "tlRow";
+    row.innerHTML = `<span class="tlRank">#${i + 1}</span>
+      <input class="tlUrl" type="text" placeholder="YouTube or TikTok link" aria-label="Link for #${i + 1}">
+      <input class="tlLabel" type="text" placeholder="Label (optional)" aria-label="Label for #${i + 1}">
+      <span class="tlTimes"><input class="tlFrom" type="text" placeholder="From" aria-label="From"><input class="tlTo" type="text" placeholder="To" aria-label="To"></span>
+      <span class="tlStatus"></span>`;
+    $(".tlUrl", row).value = v.url; $(".tlLabel", row).value = v.label;
+    $(".tlFrom", row).value = v.from; $(".tlTo", row).value = v.to;
+    box.appendChild(row);
+  }
+  $("#tlGo").textContent = `Make my Top ${n}`;
+  $("#tlTotal").textContent = `About ${n * Number($("#tlSeconds").value)}s long`;
+}
+$("#tlCount").onchange = () => {
+  $("#tlTitle").value = $("#tlTitle").value.replace(/^Top \d+/i, `Top ${$("#tlCount").value}`);
+  tlRows();
+};
+$("#tlSeconds").onchange = tlRows;
+$("#tlGo").onclick = async () => {
+  const rows = [...document.querySelectorAll(".tlRow")];
+  const prog = $("#tlProgress");
+  const entries = rows.map((r) => ({
+    row: r, url: $(".tlUrl", r).value.trim(), label: $(".tlLabel", r).value.trim(),
+    from: $(".tlFrom", r).value.trim(), to: $(".tlTo", r).value.trim(),
+  }));
+  const missing = entries.filter((e) => !e.url).map((e, i) => i);
+  if (missing.length) {
+    setProgress(prog, 0, `Paste a link in every box first (${missing.length} empty).`);
+    return;
+  }
+  $("#tlGo").disabled = true;
+  try {
+    // 1. Download each link (skipping ones already downloaded with the same times).
+    for (let i = 0; i < entries.length; i++) {
+      const e = entries[i];
+      const status = $(".tlStatus", e.row);
+      const key = `${e.url}|${e.from}|${e.to}`;
+      if (!tl.cache[key]) {
+        status.className = "tlStatus";
+        status.textContent = "Downloading...";
+        try {
+          const { job } = await api("/api/montage/fetch", {
+            url: e.url, start: e.from ? parseTime(e.from) : null, end: e.to ? parseTime(e.to) : null,
+          });
+          tl.cache[key] = await waitJob(job, prog);
+        } catch (err) {
+          status.className = "tlStatus err";
+          status.textContent = err.message;
+          throw new Error(`#${i + 1} didn't download. Fix that link (or try another) and click the button again.`);
+        }
+      }
+      e.clip = tl.cache[key];
+      status.className = "tlStatus ok";
+      status.textContent = `Ready: ${e.clip.title} (${e.clip.duration.toFixed(0)}s)`;
+      setProgress(prog, (i + 1) / (entries.length + 2), `Downloaded ${i + 1} of ${entries.length}`);
+    }
+    // 2. Pick the best few seconds of each (and rank them, if asked).
+    setProgress(prog, entries.length / (entries.length + 2), "Finding the best part of each clip...");
+    const pickForm = new FormData();
+    pickForm.append("items", JSON.stringify(entries.map((e) => ({ kind: "link", id: e.clip.id }))));
+    pickForm.append("target", entries.length * Number($("#tlSeconds").value));
+    const res = await fetch("/api/montage/autopick", { method: "POST", body: pickForm });
+    const pick = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(pick.error || "Couldn't analyze the clips.");
+    const order = $("#tlRank").value === "auto" ? pick.order : entries.map((_, i) => i);
+    // 3. Build: ranked best first, played as a countdown so #1 comes last.
+    const ranked = order.map((idx, r) => ({ e: entries[idx], p: pick.picks[idx], rank: r + 1 }));
+    const played = ranked.slice().reverse();
+    const form = new FormData();
+    form.append("format", "top");
+    form.append("top_title", $("#tlTitle").value.trim());
+    form.append("items", JSON.stringify(played.map((x) => ({ kind: "link", id: x.e.clip.id }))));
+    form.append("trims", JSON.stringify(played.map((x) => ({ start: x.p.start, end: x.p.end, rank: x.rank, label: x.e.label }))));
+    form.append("whoosh", $("#tlWhoosh").checked ? "1" : "0");
+    setProgress(prog, (entries.length + 1) / (entries.length + 2), "Building your countdown...");
+    const res2 = await fetch("/api/montage", { method: "POST", body: form });
+    const data = await res2.json().catch(() => ({}));
+    if (!res2.ok) throw new Error(data.error || "Couldn't build the video.");
+    const project = await waitJob(data.job, prog);
+    // Phone videos are already vertical, so a straight center crop fits them best.
+    if ($("#cropMode").value === "auto") $("#cropMode").value = "center";
+    openProject(project, prog);
+    setProgress(prog, 1, "Done! Pick music and a style, then Render.");
+  } catch (err) {
+    setProgress(prog, 0, errText(err.message));
+  } finally {
+    $("#tlGo").disabled = false;
+  }
+};
+tlRows();
 
 loadStyle();
 loadStatus();

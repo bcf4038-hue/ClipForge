@@ -19,12 +19,33 @@ def set_auth(browser=None, cookie_file=None):
         _auth["cookiesfrombrowser"] = (browser,)
 
 
-def _base_opts():
-    return {"quiet": True, "no_warnings": True, "noplaylist": True, "noprogress": True, **_auth}
+_impersonate = None  # cached: the "pretend to be Chrome" option, or {} if unavailable
+
+
+def _impersonate_opts():
+    """TikTok blocks plain downloaders; yt-dlp can pose as Chrome if curl-cffi is installed."""
+    global _impersonate
+    if _impersonate is None:
+        try:
+            from yt_dlp.networking.impersonate import ImpersonateTarget
+            opts = {"impersonate": ImpersonateTarget.from_str("chrome")}
+            with yt_dlp.YoutubeDL({**opts, "quiet": True}):
+                pass  # raises if no backend can impersonate
+            _impersonate = opts
+        except Exception:
+            _impersonate = {}
+    return _impersonate
+
+
+def _base_opts(url=None):
+    opts = {"quiet": True, "no_warnings": True, "noplaylist": True, "noprogress": True, **_auth}
+    if url and "tiktok.com" in url:
+        opts.update(_impersonate_opts())
+    return opts
 
 
 def get_info(url):
-    with yt_dlp.YoutubeDL({**_base_opts(), "skip_download": True}) as ydl:
+    with yt_dlp.YoutubeDL({**_base_opts(url), "skip_download": True}) as ydl:
         return ydl.sanitize_info(ydl.extract_info(url, download=False))
 
 
@@ -76,7 +97,7 @@ def _parse_json3(data):
 def get_caption_words(url, info):
     """Return (words, source) using YouTube's captions, or (None, None) if there are none."""
     lang = (info.get("language") or "").split("-")[0] or None
-    with yt_dlp.YoutubeDL(_base_opts()) as ydl:
+    with yt_dlp.YoutubeDL(_base_opts(url)) as ydl:
         # Auto captions carry per-word timing; uploaded captions only have per-line timing.
         for source, tracks in (("youtube-auto", info.get("automatic_captions")),
                                ("youtube-manual", info.get("subtitles"))):
@@ -91,7 +112,7 @@ def get_caption_words(url, info):
 
 
 def download_audio(url, out_dir):
-    opts = {**_base_opts(), "format": "bestaudio/best",
+    opts = {**_base_opts(url), "format": "bestaudio/best",
             "outtmpl": os.path.join(out_dir, "audio.%(ext)s")}
     with yt_dlp.YoutubeDL(opts) as ydl:
         ydl.download([url])
@@ -101,7 +122,7 @@ def download_audio(url, out_dir):
 def download_video(url, out_base):
     """Download a whole video as an mp4 (up to 1080p)."""
     opts = {
-        **_base_opts(),
+        **_base_opts(url),
         "format": "bv*[height<=1080][ext=mp4]+ba[ext=m4a]/bv*[height<=1080]+ba/b[height<=1080]/b",
         "merge_output_format": "mp4",
         "outtmpl": out_base + ".%(ext)s",
@@ -121,7 +142,7 @@ def download_section(url, start, end, out_base):
     if existing:
         return existing[0]
     opts = {
-        **_base_opts(),
+        **_base_opts(url),
         "format": "bv*[height<=1080][ext=mp4]+ba[ext=m4a]/bv*[height<=1080]+ba/b[height<=1080]/b",
         "download_ranges": download_range_func(None, [(start, end)]),
         "force_keyframes_at_cuts": True,  # frame-accurate cut so captions stay in sync
