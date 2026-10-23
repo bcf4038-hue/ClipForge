@@ -87,6 +87,12 @@
       <span class="tile-text">Join your own clips or links. Auto-picks the best part of each.</span>
       <span class="tag free">Free</span>
     </button>
+    <button class="tile" data-view="styles">
+      <span class="tile-icon o"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 20l4-1 11-11-3-3L5 16l-1 4zM14 6l3 3"/></svg></span>
+      <span class="tile-title">Styles</span>
+      <span class="tile-text">Copy the look of a video you like, or design your own. Top List uses it every time.</span>
+      <span class="tag">Copying costs cents</span>
+    </button>
     <button class="tile" data-view="lab">
       <span class="tile-icon t"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 12h2M7 8v8M11 5v14M15 9v6M19 11v2M21 12h0"/></svg></span>
       <span class="tile-title">Sound Lab</span>
@@ -104,6 +110,9 @@
       <label style="grid-column: span 2">Title on screen
         <input id="tlTitle" type="text" value="Top 5 craziest Roblox moments">
       </label>
+      <label>Style
+        <select id="tlStyle"></select>
+      </label>
       <label>How many
         <select id="tlCount"><option value="3">Top 3</option><option value="5" selected>Top 5</option><option value="7">Top 7</option><option value="10">Top 10</option></select>
       </label>
@@ -117,6 +126,7 @@
         </select>
       </label>
     </div>
+    <p class="muted small">The style sets the text design, cut effects and seconds per clip. <a href="#" id="tlManageStyles">Manage styles</a></p>
     <div id="tlRows"></div>
     <div class="row">
       <label class="check"><input id="tlWhoosh" type="checkbox" checked> Whoosh between clips</label>
@@ -125,6 +135,44 @@
     <button id="tlGo" class="big">Make my Top 5</button>
     <div id="tlProgress" class="progress hidden"><div class="bar"></div><span></span></div>
     <p class="muted small">Long videos (over 20 minutes) need a From and To time. Downloaded TikToks can include TikTok's watermark. Instagram links usually need Settings > Sign-in for downloads.</p>
+  </div>
+</section>
+
+<section id="view-styles" class="view hidden">
+  <div class="panel">
+    <h2>Copy a style from a video</h2>
+    <p class="muted">Use a Top list Short whose look you like. ClipForge measures its pacing and cuts (free), then Claude studies a few frames to copy the text design (a few cents, asks first). You can tweak everything after.</p>
+    <div class="row">
+      <input id="stUrl" type="text" placeholder="Link to an example video (YouTube, TikTok or Instagram)" style="flex: 1; min-width: 240px">
+      <button id="stAnalyzeUrl">Copy style</button>
+      <span class="muted">or</span>
+      <label class="upload ghost">Upload example<input id="stFile" type="file" accept="video/*" hidden></label>
+    </div>
+    <div id="stProgress" class="progress hidden"><div class="bar"></div><span></span></div>
+    <p id="stNotes" class="muted"></p>
+  </div>
+
+  <div class="layout">
+    <div class="panel">
+      <h2>Edit style</h2>
+      <div class="row">
+        <select id="stPick" aria-label="Style to edit" style="flex: 1; min-width: 180px"></select>
+        <button id="stNew" class="ghost">New style</button>
+      </div>
+      <label>Style name <input id="stName" type="text" placeholder="e.g. RoRush Top 5"></label>
+      <div id="stForm"></div>
+      <div class="row">
+        <button id="stSave">Save style</button>
+        <button id="stDelete" class="ghost">Delete</button>
+        <span id="stSaved" class="muted small"></span>
+      </div>
+      <p class="muted small">Want a font that isn't listed? Download a free one (for example from fonts.google.com), put the .ttf file in ClipForge's <b>fonts</b> folder, and restart ClipForge.</p>
+    </div>
+    <div class="panel">
+      <div class="row spread"><h2>Preview</h2><button id="stRefresh" class="ghost tiny">Refresh</button></div>
+      <img id="stPreview" alt="Preview of the style's title, rank number and label" style="width: 100%; max-width: 360px; aspect-ratio: 9/16; display: block; margin: 0 auto; border-radius: 12px; background: #000">
+      <p class="muted small" style="text-align: center">Updates as you change settings. Cut effects (flash, zoom) only show in the real video.</p>
+    </div>
   </div>
 </section>
 

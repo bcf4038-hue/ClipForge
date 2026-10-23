@@ -661,6 +661,7 @@ $("#renderBtn").onclick = async () => {
     sfx: c.sfx.map((f) => ({ sound: f.sound, at: f.at, volume: f.volume })),
     voiceover: c.voiceover && c.voiceover.text.trim() ? c.voiceover : null,
     overlays: c.overlays || null,
+    effects: c.effects || null,
   }));
   const payload = {
     video_id: state.project.video_id, url: state.project.url, clips,
@@ -904,13 +905,14 @@ $("#labSave").onclick = async () => {
 $("#mode").onchange = () => $("#clipLenWrap").classList.toggle("hidden", $("#mode").value !== "hype");
 
 // ---------- screens ----------
-const VIEWS = ["home", "toplinks", "long", "montage", "lab"];
+const VIEWS = ["home", "toplinks", "long", "montage", "lab", "styles"];
 function showView(name) {
   VIEWS.forEach((v) => $(`#view-${v}`).classList.toggle("hidden", v !== name));
   $("#workspace").classList.toggle("hidden", name !== "editor");
   $("#editorBtn").classList.toggle("hidden", !state.project || name === "editor");
   window.scrollTo(0, 0);
   if (name === "lab") drawWave();
+  if (name === "styles") stPreview();
 }
 document.querySelectorAll(".tile").forEach((t) => { t.onclick = () => showView(t.dataset.view); });
 $("#homeBtn").onclick = () => showView("home");
@@ -1002,13 +1004,14 @@ $("#tlGo").onclick = async () => {
     form.append("items", JSON.stringify(played.map((x) => ({ kind: "link", id: x.e.clip.id }))));
     form.append("trims", JSON.stringify(played.map((x) => ({ start: x.p.start, end: x.p.end, rank: x.rank, label: x.e.label }))));
     form.append("whoosh", $("#tlWhoosh").checked ? "1" : "0");
+    form.append("style", JSON.stringify(tlStyle()));
     setProgress(prog, (entries.length + 1) / (entries.length + 2), "Building your countdown...");
     const res2 = await fetch("/api/montage", { method: "POST", body: form });
     const data = await res2.json().catch(() => ({}));
     if (!res2.ok) throw new Error(data.error || "Couldn't build the video.");
     const project = await waitJob(data.job, prog);
-    // Phone videos are already vertical, so a straight center crop fits them best.
-    if ($("#cropMode").value === "auto") $("#cropMode").value = "center";
+    // The style decides framing (phone videos are already vertical, so "center" fits them).
+    $("#cropMode").value = tlStyle().framing || "center";
     openProject(project, prog);
     setProgress(prog, 1, "Done! Pick music and a style, then Render.");
   } catch (err) {
@@ -1018,6 +1021,215 @@ $("#tlGo").onclick = async () => {
   }
 };
 tlRows();
+
+// ---------- Styles ----------
+const st = { styles: [], fonts: [], current: null, ref: null };
+const STYLE_FIELDS = [
+  ["General", "", [
+    ["seconds_per_clip", "Seconds per clip", "int", 2, 15],
+    ["framing", "Framing", ["center", "fit"]],
+    ["cut.whoosh", "Whoosh at each cut", "bool"],
+    ["cut.flash", "White flash at each cut", "bool"],
+    ["cut.zoom", "Zoom punch at each cut", "bool"],
+  ]],
+  ["Title", "title", [
+    ["show", "Show title", "bool"], ["font", "Font", "font"], ["size", "Size", "int", 30, 200],
+    ["color", "Text color", "color"], ["outline", "Outline width", "int", 0, 30], ["outline_color", "Outline color", "color"],
+    ["box", "Box behind text", "bool"], ["box_color", "Box color", "color"], ["box_opacity", "Box opacity", "pct"],
+    ["y", "Height on screen", "pct"], ["uppercase", "ALL CAPS", "bool"],
+  ]],
+  ["Rank number", "rank", [
+    ["font", "Font", "font"], ["size", "Size", "int", 60, 400], ["color", "Color", "color"],
+    ["outline", "Outline width", "int", 0, 40], ["outline_color", "Outline color", "color"],
+    ["y", "Height on screen", "pct"], ["prefix", "Before the number", "text"], ["animation", "Animation", ["pop", "fade", "none"]],
+  ]],
+  ["Label", "label", [
+    ["show", "Show labels", "bool"], ["font", "Font", "font"], ["size", "Size", "int", 30, 200],
+    ["color", "Color", "color"], ["outline", "Outline width", "int", 0, 30], ["outline_color", "Outline color", "color"],
+    ["y", "Height on screen", "pct"], ["uppercase", "ALL CAPS", "bool"],
+  ]],
+];
+const getPath = (obj, path) => path.split(".").reduce((o, k) => (o ? o[k] : undefined), obj);
+function setPath(obj, path, value) {
+  const keys = path.split(".");
+  let o = obj;
+  keys.slice(0, -1).forEach((k) => { o[k] = o[k] || {}; o = o[k]; });
+  o[keys[keys.length - 1]] = value;
+}
+function stRenderForm() {
+  const box = $("#stForm");
+  box.innerHTML = "";
+  STYLE_FIELDS.forEach(([title, group, fields]) => {
+    const h = document.createElement("h3");
+    h.textContent = title;
+    box.appendChild(h);
+    const grid = document.createElement("div");
+    grid.className = "grid";
+    fields.forEach(([key, label, type, min, max]) => {
+      const path = group ? `${group}.${key}` : key;
+      const value = getPath(st.current, path);
+      const wrap = document.createElement("label");
+      let input;
+      if (type === "bool") {
+        wrap.className = "check";
+        input = document.createElement("input");
+        input.type = "checkbox";
+        input.checked = !!value;
+        wrap.append(input, document.createTextNode(" " + label));
+      } else {
+        wrap.append(document.createTextNode(label));
+        if (Array.isArray(type) || type === "font") {
+          input = document.createElement("select");
+          const opts = type === "font" ? st.fonts : type;
+          input.innerHTML = opts.map((o) => `<option>${o}</option>`).join("");
+          if (type === "font" && value && !opts.includes(value)) input.innerHTML += `<option>${value}</option>`;
+          input.value = value;
+        } else {
+          input = document.createElement("input");
+          input.type = type === "color" ? "color" : type === "pct" ? "range" : "text";
+          if (type === "pct") { input.min = 0; input.max = 100; input.value = Math.round((value ?? 0) * 100); }
+          else input.value = value ?? "";
+        }
+        wrap.appendChild(input);
+      }
+      input.dataset.path = path;
+      input.dataset.type = Array.isArray(type) ? "enum" : type;
+      if (type === "int") { input.dataset.min = min; input.dataset.max = max; }
+      input.addEventListener("input", () => { stReadForm(); stPreviewSoon(); });
+      input.addEventListener("change", () => { stReadForm(); stPreviewSoon(); });
+      grid.appendChild(wrap);
+    });
+    box.appendChild(grid);
+  });
+  $("#stName").value = st.current.name || "";
+}
+function stReadForm() {
+  document.querySelectorAll("#stForm [data-path]").forEach((el) => {
+    const t = el.dataset.type;
+    let v;
+    if (t === "bool") v = el.checked;
+    else if (t === "pct") v = Number(el.value) / 100;
+    else if (t === "int") v = Math.min(Number(el.dataset.max), Math.max(Number(el.dataset.min), Math.round(Number(el.value) || 0)));
+    else v = el.value;
+    setPath(st.current, el.dataset.path, v);
+  });
+  st.current.name = $("#stName").value.trim();
+}
+let stTimer = null;
+const stPreviewSoon = () => { clearTimeout(stTimer); stTimer = setTimeout(stPreview, 400); };
+async function stPreview() {
+  if (!st.current) return;
+  try {
+    const res = await fetch("/api/styles/preview", {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ style: st.current, ref: st.ref, title: $("#tlTitle").value }),
+    });
+    if (!res.ok) return;
+    const img = $("#stPreview");
+    if (img.dataset.url) URL.revokeObjectURL(img.dataset.url);
+    img.dataset.url = URL.createObjectURL(await res.blob());
+    img.src = img.dataset.url;
+  } catch (e) { /* preview is best effort */ }
+}
+async function loadStyles(selectName) {
+  const data = await api("/api/styles");
+  st.styles = data.styles;
+  st.fonts = data.fonts;
+  const opts = st.styles.map((x) => `<option>${x.name.replace(/</g, "&lt;")}</option>`).join("");
+  let saved = null;
+  try { saved = localStorage.getItem("clipforge:tlStyle"); } catch (e) { saved = null; }
+  $("#tlStyle").innerHTML = opts;
+  $("#tlStyle").value = selectName || saved || st.styles[0].name;
+  if (!$("#tlStyle").value) $("#tlStyle").value = st.styles[0].name;
+  $("#stPick").innerHTML = opts;
+  const pick = selectName || (st.current && st.current.name) || st.styles[0].name;
+  $("#stPick").value = st.styles.some((x) => x.name === pick) ? pick : st.styles[0].name;
+  if (!st.current || selectName) stEdit($("#stPick").value);
+  tlApplyStyle();
+}
+function stEdit(name) {
+  const found = st.styles.find((x) => x.name === name);
+  st.current = JSON.parse(JSON.stringify(found || st.styles[0]));
+  st.ref = null;
+  $("#stNotes").textContent = "";
+  stRenderForm();
+  stPreview();
+}
+const tlStyle = () => st.styles.find((x) => x.name === $("#tlStyle").value) || st.styles[0] || {};
+function tlApplyStyle() {
+  const style = tlStyle();
+  if (!style.name) return;
+  const secs = String(style.seconds_per_clip);
+  if (![...$("#tlSeconds").options].some((o) => o.value === secs)) $("#tlSeconds").innerHTML += `<option value="${secs}">${secs}s</option>`;
+  $("#tlSeconds").value = secs;
+  $("#tlWhoosh").checked = !!(style.cut && style.cut.whoosh);
+  try { localStorage.setItem("clipforge:tlStyle", style.name); } catch (e) { /* ignore */ }
+  tlRows();
+}
+$("#tlStyle").onchange = tlApplyStyle;
+$("#tlManageStyles").onclick = (e) => { e.preventDefault(); showView("styles"); };
+$("#stPick").onchange = () => stEdit($("#stPick").value);
+$("#stNew").onclick = () => { stEdit(st.styles[0].name); st.current.name = ""; $("#stName").value = ""; $("#stName").focus(); };
+$("#stName").oninput = () => { st.current.name = $("#stName").value.trim(); };
+$("#stRefresh").onclick = stPreview;
+$("#stSave").onclick = async () => {
+  stReadForm();
+  try {
+    const { style } = await api("/api/styles", st.current);
+    $("#stSaved").textContent = `Saved "${style.name}". Pick it under Style in Top List from Links.`;
+    await loadStyles(style.name);
+  } catch (e) {
+    $("#stSaved").textContent = `Error: ${e.message}`;
+  }
+};
+$("#stDelete").onclick = async () => {
+  if (!st.current.name || st.current.name === "Classic") { $("#stSaved").textContent = "The built-in Classic style can't be deleted."; return; }
+  if (!confirm(`Delete the style "${st.current.name}"?`)) return;
+  await api("/api/styles/delete", { name: st.current.name });
+  st.current = null;
+  $("#stSaved").textContent = "Deleted.";
+  await loadStyles();
+};
+async function stAnalyze(form) {
+  const prog = $("#stProgress");
+  $("#stAnalyzeUrl").disabled = true;
+  setProgress(prog, 0.02, "Starting...");
+  try {
+    const res = await fetch("/api/styles/analyze", { method: "POST", body: form });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(data.error || `Failed (${res.status})`);
+    const r = await waitJob(data.job, prog, "Copying the style of your example video");
+    st.current = r.style;
+    st.ref = r.ref;
+    stRenderForm();
+    stPreview();
+    const m = r.measured;
+    $("#stNotes").textContent = `Measured: ${m.cuts} cuts, about ${m.seconds_per_clip.toFixed(1)}s per entry` +
+      `${m.flash ? ", white flashes on cuts" : ""}. ${r.notes || ""} Name it and click Save style.`;
+    setProgress(prog, 1, `Style copied (cost ${money(r.cost)}). Check the preview, tweak anything, then save.`);
+    $("#stName").focus();
+  } catch (e) {
+    setProgress(prog, 0, errText(e.message));
+  } finally {
+    $("#stAnalyzeUrl").disabled = false;
+  }
+}
+$("#stAnalyzeUrl").onclick = () => {
+  const url = $("#stUrl").value.trim();
+  if (!url) return;
+  const form = new FormData();
+  form.append("url", url);
+  stAnalyze(form);
+};
+$("#stFile").onchange = () => {
+  const f = $("#stFile").files[0];
+  if (!f) return;
+  const form = new FormData();
+  form.append("file", f);
+  $("#stFile").value = "";
+  stAnalyze(form);
+};
+loadStyles();
 
 loadStyle();
 loadStatus();

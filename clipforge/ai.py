@@ -247,3 +247,73 @@ def estimate_voiceover(api_key, req):
 def write_voiceover(api_key, req):
     data, usage = _run_json(api_key, req, VO_MAX_OUTPUT, "write this voiceover")
     return data["script"].strip(), usage
+
+
+# ---------- copy a style from an example video ----------
+
+STYLE_SYSTEM = """You are a video editor reverse-engineering the on-screen text design of a short-form \
+"Top N" countdown video, so the same look can be applied to new videos.
+
+You get frames from the example. Describe only text overlays you can actually see:
+- title: a headline that stays on screen (usually near the top), e.g. "TOP 5 SCARIEST GAMES".
+- rank: the big number for each entry, e.g. "#3" or "3.".
+- label: smaller text naming the current entry, near the rank.
+Ignore captions of speech, watermarks, usernames and platform UI.
+
+Positions are the vertical CENTER of the text as a fraction of frame height (0 = top, 1 = bottom), \
+except the title, which is its TOP edge. Sizes are font sizes in pixels on a 1080x1920 frame \
+(a capital letter is roughly 0.7x the font size tall). Colors are hex like #FFE600. Pick the closest \
+font from the allowed list. If an element is not visible in any frame, set show to false and keep \
+sensible values. Put anything you could not reproduce (special animations, stickers, gradients, \
+emoji) in notes, in one or two plain sentences."""
+
+_TEXT_PROPS = {
+    "font": {"type": "string"},
+    "size": {"type": "integer"},
+    "color": {"type": "string"},
+    "outline_color": {"type": "string"},
+    "outline": {"type": "integer", "description": "Outline thickness in px, 0 for none"},
+    "y": {"type": "number"},
+    "uppercase": {"type": "boolean"},
+}
+
+
+def _style_schema(fonts):
+    text = lambda extra: {"type": "object", "additionalProperties": False,
+                          "properties": {**_TEXT_PROPS, "font": {"type": "string", "enum": fonts}, **extra},
+                          "required": list(_TEXT_PROPS) + list(extra)}
+    return {
+        "type": "object", "additionalProperties": False,
+        "properties": {
+            "title": text({"show": {"type": "boolean"}, "box": {"type": "boolean"},
+                           "box_color": {"type": "string"}, "box_opacity": {"type": "number"}}),
+            "rank": text({"prefix": {"type": "string", "description": "Text before the number, e.g. '#' or ''"},
+                          "animation": {"type": "string", "enum": ["pop", "fade", "none"]}}),
+            "label": text({"show": {"type": "boolean"}}),
+            "framing": {"type": "string", "enum": ["center", "fit"],
+                        "description": "center = footage fills the vertical frame; fit = smaller footage over a blurred copy"},
+            "notes": {"type": "string"},
+        },
+        "required": ["title", "rank", "label", "framing", "notes"],
+    }
+
+
+def style_request(frames_b64, fonts, measured):
+    content = []
+    for i, data in enumerate(frames_b64):
+        content.append({"type": "text", "text": f"Frame {i + 1}:"})
+        content.append({"type": "image", "source": {"type": "base64", "media_type": "image/jpeg", "data": data}})
+    content.append({"type": "text", "text": (
+        f"Measured from the video: {measured['cuts']} cuts, about {measured['seconds_per_clip']:.1f} seconds "
+        f"per entry, frame size {measured['width']}x{measured['height']}.\n"
+        "Describe the title, rank and label text design.")})
+    return {"model": MODEL, "system": STYLE_SYSTEM, "messages": [{"role": "user", "content": content}],
+            "output_config": {"effort": "medium", "format": {"type": "json_schema", "schema": _style_schema(fonts)}}}
+
+
+def estimate_style(api_key, req):
+    return _estimate(api_key, req, (1500, 5000), 12000)
+
+
+def copy_style(api_key, req):
+    return _run_json(api_key, req, 12000, "describe this video's style")

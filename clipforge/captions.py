@@ -1,4 +1,5 @@
 """Build word-by-word animated captions as an .ass subtitle file for FFmpeg."""
+from . import styles
 
 
 def _ass_color(hex_color):
@@ -73,6 +74,32 @@ def _chunks(words, per_chunk):
 POSITIONS = {"bottom": (2, 420), "middle": (5, 0), "top": (8, 300)}
 
 
+def _alpha_color(hex_color, opacity=1.0):
+    """ASS colour with transparency: &HAABBGGRR, where AA=00 is solid."""
+    h = hex_color.lstrip("#")
+    alpha = int(round((1 - max(0.0, min(1.0, float(opacity)))) * 255))
+    return f"&H{alpha:02X}{h[4:6]}{h[2:4]}{h[0:2]}".upper()
+
+
+def _overlay_styles(overlays):
+    """Title / Rank / Label styles for top-list videos, taken from the overlay's Style."""
+    if not overlays:
+        return ""
+    st = styles.merged(overlays.get("style"))
+    t, r, l = st["title"], st["rank"], st["label"]
+    if t.get("box"):
+        title = (f"Style: Title,{t['font']},{int(t['size'])},{_ass_color(t['color'])},{_ass_color(t['color'])},"
+                 f"{_alpha_color(t['box_color'], t.get('box_opacity', 0.8))},&H00000000,-1,0,0,0,100,100,0,0,3,22,0,8,60,60,0,1")
+    else:
+        title = (f"Style: Title,{t['font']},{int(t['size'])},{_ass_color(t['color'])},{_ass_color(t['color'])},"
+                 f"{_ass_color(t['outline_color'])},&H80000000,-1,0,0,0,100,100,0,0,1,{int(t['outline'])},3,8,60,60,0,1")
+    rank = (f"Style: Rank,{r['font']},{int(r['size'])},{_ass_color(r['color'])},{_ass_color(r['color'])},"
+            f"{_ass_color(r['outline_color'])},&H80000000,-1,0,0,0,100,100,0,0,1,{int(r['outline'])},6,5,60,60,0,1")
+    label = (f"Style: Label,{l['font']},{int(l['size'])},{_ass_color(l['color'])},{_ass_color(l['color'])},"
+             f"{_ass_color(l['outline_color'])},&H80000000,-1,0,0,0,100,100,0,0,1,{int(l['outline'])},3,5,80,80,0,1")
+    return "\n".join([title, rank, label])
+
+
 def build_ass(words, style, duration, overlays=None):
     """overlays: None or {"title": str, "ranks": [{"start", "end", "rank", "label"}]} for top-list videos."""
     font = style.get("font", "Arial Black")
@@ -93,9 +120,7 @@ ScaledBorderAndShadow: yes
 [V4+ Styles]
 Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding
 Style: Cap,{font},{size},{color},{color},&H00000000,&H80000000,-1,0,0,0,100,100,0,0,1,{max(3, size // 14)},3,{align},60,60,{margin_v},1
-Style: Title,{font},70,&H00FFFFFF,&H00FFFFFF,&H30101010,&H00000000,-1,0,0,0,100,100,0,0,3,22,0,8,70,70,150,1
-Style: Rank,{font},230,{_ass_color(style.get("highlight", "#FFE600"))},&H00FFFFFF,&H00000000,&H80000000,-1,0,0,0,100,100,0,0,1,12,6,8,60,60,330,1
-Style: Label,{font},70,&H00FFFFFF,&H00FFFFFF,&H00000000,&H80000000,-1,0,0,0,100,100,0,0,1,6,3,8,80,80,600,1
+{_overlay_styles(overlays)}
 
 [Events]
 Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
@@ -123,17 +148,24 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
                     parts.append(t)
             lines.append(f"Dialogue: 0,{_ts(start)},{_ts(end)},Cap,,0,0,0,,{' '.join(parts)}")
     if overlays:
-        if overlays.get("title"):
-            title = _escape(overlays["title"].upper() if upper else overlays["title"])
-            lines.append(f"Dialogue: 1,{_ts(0)},{_ts(duration)},Title,,0,0,0,,{{\\fad(250,0)}}{title}")
+        st = styles.merged(overlays.get("style"))
+        t, rk, lb = st["title"], st["rank"], st["label"]
+        H = 1920
+        if overlays.get("title") and t.get("show", True):
+            text = overlays["title"].upper() if t.get("uppercase", True) else overlays["title"]
+            lines.append(f"Dialogue: 1,{_ts(0)},{_ts(duration)},Title,,0,0,0,,"
+                         f"{{\\an8\\pos(540,{int(float(t['y']) * H)})\\fad(250,0)}}{_escape(text)}")
+        anim = {"pop": "\\fscx35\\fscy35\\t(0,200,\\fscx100\\fscy100)", "fade": "\\fad(200,0)", "none": ""}
         for r in overlays.get("ranks", []):
             start, end = float(r["start"]), min(float(r["end"]), duration)
             if end <= start:
                 continue
-            # The number pops in from small, the label fades in just after it.
+            # The number pops in, the label fades in just after it.
             lines.append(f"Dialogue: 2,{_ts(start)},{_ts(end)},Rank,,0,0,0,,"
-                         f"{{\\fscx35\\fscy35\\t(0,200,\\fscx100\\fscy100)}}#{int(r['rank'])}")
-            if r.get("label"):
-                label = _escape(r["label"].upper() if upper else r["label"])
-                lines.append(f"Dialogue: 2,{_ts(start + 0.15)},{_ts(end)},Label,,0,0,0,,{{\\fad(200,0)}}{label}")
+                         f"{{\\an5\\pos(540,{int(float(rk['y']) * H)}){anim.get(rk.get('animation'), anim['pop'])}}}"
+                         f"{_escape(rk.get('prefix', '#'))}{int(r['rank'])}")
+            if r.get("label") and lb.get("show", True):
+                text = r["label"].upper() if lb.get("uppercase", True) else r["label"]
+                lines.append(f"Dialogue: 2,{_ts(start + 0.15)},{_ts(end)},Label,,0,0,0,,"
+                             f"{{\\an5\\pos(540,{int(float(lb['y']) * H)})\\fad(200,0)}}{_escape(text)}")
     return header + "\n".join(lines) + "\n"

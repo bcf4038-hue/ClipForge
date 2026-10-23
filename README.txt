@@ -26,6 +26,15 @@ ranks them, and click "Make my Top 5". ClipForge downloads each video, keeps the
 best few seconds, builds the countdown (#1 last) and opens the editor. Pick music
 and a style, then Render.
 
+STYLES (make every Top List look the same)
+------------------------------------------
+Home > Styles. Paste a link to (or upload) a Top list Short you like and click
+"Copy style": ClipForge measures its cuts, pacing and flashes (free), then Claude
+looks at a few frames and copies the title, rank number and label design (a few
+cents, asks first). Check the preview, tweak anything, name it, Save. Then pick it
+under "Style" in Top List from Links and every video comes out in that format.
+Extra fonts: put .ttf files in the fonts folder and restart ClipForge.
+
 EVERY TIME YOU USE IT
 ---------------------
 (Campaign gave you video files, e.g. on Google Drive? Download them, then use

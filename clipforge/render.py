@@ -35,8 +35,26 @@ def _video_filter(mode, src, w, h, track_cache):
     return f"[0:v]{base},crop={crop.OUT_W}:{crop.OUT_H}:'{x}':'(ih-oh)/2'"
 
 
+def _cut_effects(effects):
+    """Quick zoom punch and/or white flash at each cut, applied after the 9:16 crop."""
+    if not effects or not effects.get("cuts"):
+        return ""
+    cuts = [float(c) for c in effects["cuts"]]
+    out = ""
+    if effects.get("zoom"):
+        # Scale jumps 12% at each cut and eases back over 0.3 s; commas escaped for the filter graph.
+        punch = "+".join(f"max(0\\,1-abs(t-{c:.3f})/0.3)*gte(t\\,{c:.3f})" for c in cuts)
+        out += (f",scale=w='trunc(1080*(1+0.12*({punch}))/2)*2':h=-2:eval=frame,"
+                f"crop={crop.OUT_W}:{crop.OUT_H}")
+    if effects.get("flash"):
+        when = "+".join(f"between(t\\,{c - 0.03:.3f}\\,{c + 0.07:.3f})" for c in cuts)
+        out += f",drawbox=color=white@0.85:t=fill:enable='{when}'"
+    return out
+
+
 def render(src, out_path, words, style, crop_mode, music, sfx, workdir,
-           ffmpeg="ffmpeg", ffprobe="ffprobe", progress=lambda p: None, voiceover=None, overlays=None):
+           ffmpeg="ffmpeg", ffprobe="ffprobe", progress=lambda p: None, voiceover=None, overlays=None,
+           effects=None, fonts_dir=None):
     """
     words:     clip-relative caption words [{w, s, e}]
     music:     None or {"path", "volume"} (volume 0..1)
@@ -51,8 +69,13 @@ def render(src, out_path, words, style, crop_mode, music, sfx, workdir,
         f.write(captions.build_ass(words, style, duration, overlays))
 
     vf = _video_filter(crop_mode, src, w, h, os.path.join(workdir, base + ".faces.json"))
+    vf += _cut_effects(effects)
     if words or overlays:
         vf += f",ass={ass_name}"
+        if fonts_dir and os.path.isdir(fonts_dir):
+            # Relative path with forward slashes: a Windows "C:\" path breaks FFmpeg's filter syntax.
+            rel = os.path.relpath(fonts_dir, workdir).replace("\\", "/")
+            vf += f":fontsdir={rel}"
     filters = [vf + ",format=yuv420p[v]"]
 
     inputs = ["-i", os.path.abspath(src)]

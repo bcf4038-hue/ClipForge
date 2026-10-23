@@ -2,6 +2,7 @@
 config.json
 cookies.txt
 usage.json
+styles.json
 .version
 
 # Working files and finished clips
@@ -13,6 +14,10 @@ sounds/my_sfx/*
 sounds/my_music/*
 !sounds/my_sfx/.keep
 !sounds/my_music/.keep
+
+# Your own fonts
+fonts/*
+!fonts/.keep
 
 # Python
 .venv/

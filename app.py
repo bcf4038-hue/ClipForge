@@ -13,7 +13,7 @@ import webbrowser
 
 from flask import Flask, abort, jsonify, request, send_from_directory
 
-from clipforge import ai, autopick, captions, hype, render, soundlab, tts, youtube
+from clipforge import ai, autopick, captions, hype, render, soundlab, styles, tts, youtube
 
 ROOT = os.path.dirname(os.path.abspath(__file__))
 WORK = os.path.join(ROOT, "work")
@@ -23,6 +23,8 @@ CONFIG = os.path.join(ROOT, "config.json")
 COOKIES = os.path.join(ROOT, "cookies.txt")
 USAGE = os.path.join(ROOT, "usage.json")
 DEFAULT_BUDGET = 20.0
+STYLES = os.path.join(ROOT, "styles.json")
+FONTS = os.path.join(ROOT, "fonts")
 BROWSERS = ("firefox", "chrome", "edge", "brave")
 SOUND_DIRS = {
     "sfx": [("starter", "starter/sfx"), ("mine", "my_sfx")],
@@ -304,7 +306,8 @@ def render_all(update, payload):
             render.render(src, os.path.join(OUTPUT, out_name), cw, style, clip.get("crop_mode") or crop_mode,
                           music, sfx, vdir, FFMPEG, FFPROBE,
                           lambda p: update(done + share * (0.3 + 0.7 * p), f"{label}: rendering {int(p * 100)}%"),
-                          voiceover=voiceover, overlays=clip.get("overlays"))
+                          voiceover=voiceover, overlays=clip.get("overlays"),
+                          effects=clip.get("effects"), fonts_dir=FONTS)
             results.append({"id": clip.get("id"), "title": clip.get("title"), "file": out_name})
         return results
 
@@ -456,7 +459,7 @@ def api_upload_video():
     return jsonify(job=start_job(analyze, "", True, mode, int(body.get("clip_len", 30)), vid))
 
 
-def build_montage(update, vid, parts, whoosh, top_title=None):
+def build_montage(update, vid, parts, whoosh, top_title=None, style=None):
     """Join several clips (each trimmed) into one 1920x1080 video, then open it as a project."""
     vdir = os.path.join(WORK, vid)
     inputs, filters, labels = [], [], []
@@ -507,7 +510,10 @@ def build_montage(update, vid, parts, whoosh, top_title=None):
             "hook": f"Your montage. Cuts at {', '.join(f'{c:.1f}s' for c in cuts) or 'none'}.",
             "score": 0, "approved": True, "sfx": sfx}
     if top_title is not None:
-        clip["overlays"] = {"title": top_title, "ranks": ranks}
+        clip["overlays"] = {"title": top_title, "ranks": ranks, "style": style}
+        if style:
+            cut = styles.merged(style)["cut"]
+            clip["effects"] = {"cuts": cuts, "flash": bool(cut.get("flash")), "zoom": bool(cut.get("zoom"))}
         clip["hook"] = f"Top {len(ranks)} countdown. #1 plays last at {ranks[-1]['start']:.1f}s." if ranks else clip["hook"]
     return {"video_id": vid, "url": "", "title": title, "duration": total, "caption_source": "none",
             "mode": "montage", "words": [], "clips": [clip]}
@@ -640,7 +646,151 @@ def api_montage():
         parts.append({"path": path, "start": trim.get("start", 0), "end": trim.get("end"),
                       "rank": trim.get("rank"), "label": (trim.get("label") or "")[:60]})
     top_title = request.form.get("top_title") if request.form.get("format") == "top" else None
-    return jsonify(job=start_job(build_montage, vid, parts, request.form.get("whoosh") == "1", top_title))
+    try:
+        style = json.loads(request.form.get("style") or "null")
+    except ValueError:
+        style = None
+    return jsonify(job=start_job(build_montage, vid, parts, request.form.get("whoosh") == "1", top_title, style))
+
+
+# ---------- styles ----------
+
+STYLE_REF = os.path.join(WORK, "styleref")
+
+
+@app.get("/api/styles")
+def api_styles():
+    return jsonify(styles=styles.load_all(STYLES), fonts=styles.available_fonts(FONTS))
+
+
+@app.post("/api/styles")
+def api_style_save():
+    style = request.json or {}
+    if not (style.get("name") or "").strip():
+        return jsonify(error="Give the style a name first."), 400
+    if style["name"].strip() == styles.DEFAULT["name"]:
+        return jsonify(error="\"Classic\" is built in. Save your version under a different name."), 400
+    style["name"] = style["name"].strip()[:40]
+    return jsonify(style=styles.save(STYLES, style))
+
+
+@app.post("/api/styles/delete")
+def api_style_delete():
+    styles.delete(STYLES, (request.json or {}).get("name", ""))
+    return jsonify(ok=True)
+
+
+@app.post("/api/styles/preview")
+def api_style_preview():
+    """One still frame showing the style's title, rank and label, for checking a style by eye."""
+    body = request.json or {}
+    style = styles.merged(body.get("style"))
+    out_dir = os.path.join(WORK, "style_preview")
+    os.makedirs(out_dir, exist_ok=True)
+    overlays = {"title": body.get("title") or "Top 5 craziest Roblox moments",
+                "ranks": [{"start": 0, "end": 5, "rank": 1, "label": body.get("label") or "Boss fight"}],
+                "style": style}
+    with open(os.path.join(out_dir, "preview.ass"), "w", encoding="utf-8") as f:
+        f.write(captions.build_ass([], {}, 5, overlays))
+    ref = body.get("ref") or ""
+    frame = os.path.join(STYLE_REF, ref, "frame.jpg") if re.fullmatch(r"[0-9a-f]{10}", ref) else ""
+    if frame and os.path.exists(frame):
+        bg = ["-loop", "1", "-i", frame]
+        vf = "scale=1080:1920:force_original_aspect_ratio=increase,crop=1080:1920,"
+    else:
+        bg = ["-f", "lavfi", "-i", "color=c=0x1D3B44:s=1080x1920"]
+        vf = ""
+    vf += "ass=preview.ass"
+    if os.path.isdir(FONTS):
+        vf += ":fontsdir=" + os.path.relpath(FONTS, out_dir).replace("\\", "/")
+    # Rank pops in from 35% size, so grab a frame after the animation (0.5 s).
+    subprocess.run([FFMPEG, "-y", "-loglevel", "error", *bg, "-ss", "0.5", "-vf", vf, "-frames:v", "1",
+                    "preview.png"], cwd=out_dir, check=True)
+    return send_from_directory(out_dir, "preview.png", max_age=0)
+
+
+def measure_reference(src):
+    """Cuts and pacing of an example video, measured with FFmpeg (free)."""
+    w, h, duration, _ = render.probe(src, FFPROBE)
+    log = subprocess.run([FFMPEG, "-hide_banner", "-i", src, "-vf", "select='gt(scene,0.35)',showinfo",
+                          "-an", "-f", "null", "-"], capture_output=True, text=True).stderr
+    cuts = [float(x) for x in re.findall(r"pts_time:([\d.]+)", log)]
+    cuts = [c for i, c in enumerate(cuts) if c > 0.5 and (i == 0 or c - cuts[i - 1] > 0.8)]
+    edges = [0.0] + cuts + [duration]
+    lengths = sorted(b - a for a, b in zip(edges, edges[1:]) if b - a > 0.5)
+    per = lengths[len(lengths) // 2] if lengths else duration
+    # A flash shows up as a very bright frame right at a cut.
+    stats = subprocess.run([FFMPEG, "-hide_banner", "-i", src, "-vf",
+                            "fps=30,scale=64:-1,signalstats,metadata=print:key=lavfi.signalstats.YAVG",
+                            "-an", "-f", "null", "-"], capture_output=True, text=True).stderr
+    times = [float(x) for x in re.findall(r"pts_time:([\d.]+)", stats)]
+    yavg = [float(x) for x in re.findall(r"YAVG=([\d.]+)", stats)]
+    flashes = 0
+    for c in cuts:
+        near = [y for t, y in zip(times, yavg) if abs(t - c) < 0.15]
+        if near and max(near) > 200:
+            flashes += 1
+    return {"duration": duration, "width": w, "height": h, "cuts": len(cuts), "cut_times": cuts,
+            "seconds_per_clip": max(2.0, min(15.0, per)), "flash": bool(cuts) and flashes >= max(1, len(cuts) // 3)}
+
+
+def analyze_style(update, ref, url):
+    key = require_key()
+    d = os.path.join(STYLE_REF, ref)
+    if url:
+        update(0.05, "Downloading the example video...")
+        info = youtube.get_info(url)
+        if (info.get("duration") or 0) > 600:
+            raise RuntimeError("Use an example under 10 minutes long.")
+        youtube.download_video(url, os.path.join(d, "source"))
+    src = next(os.path.join(d, n) for n in os.listdir(d) if n.startswith("source."))
+    update(0.3, "Measuring cuts and pacing (free)...")
+    m = measure_reference(src)
+    # Frames: just after the start (titles), and the middle of the first few entries.
+    edges = [0.0] + m["cut_times"] + [m["duration"]]
+    times = [min(0.6, m["duration"] / 2)] + [(a + b) / 2 for a, b in list(zip(edges, edges[1:]))[:5]]
+    frames = []
+    for i, t in enumerate(times[:6]):
+        path = os.path.join(d, f"f{i}.jpg")
+        subprocess.run([FFMPEG, "-y", "-loglevel", "error", "-ss", f"{t:.2f}", "-i", src, "-frames:v", "1",
+                        "-vf", "scale=-2:900", "-q:v", "4", path], check=True)
+        with open(path, "rb") as f:
+            frames.append(base64.b64encode(f.read()).decode("ascii"))
+    shutil.copy(os.path.join(d, "f1.jpg" if len(times) > 1 else "f0.jpg"), os.path.join(d, "frame.jpg"))
+    req = ai.style_request(frames, styles.available_fonts(FONTS), m)
+    update(0.5, "Working out the cost (this check is free)...")
+    est = ai.estimate_style(key, req)
+    est.update(spending())
+    update(0.5, "Waiting for your approval...")
+    if not update.ask(est):
+        raise RuntimeError("Cancelled. Nothing was charged.")
+    update(0.6, "Claude is studying the text design...")
+    look, usage = ai.copy_style(key, req)
+    record_usage("style", "Copy a style", usage)
+    style = styles.merged({
+        "name": "", "seconds_per_clip": round(m["seconds_per_clip"]), "framing": look["framing"],
+        "cut": {"whoosh": True, "flash": m["flash"], "zoom": False},
+        "title": look["title"], "rank": look["rank"], "label": look["label"],
+    })
+    return {"ref": ref, "style": style, "measured": {k: v for k, v in m.items() if k != "cut_times"},
+            "notes": look.get("notes", ""), "cost": usage["cost"]}
+
+
+@app.post("/api/styles/analyze")
+def api_style_analyze():
+    ref = uuid.uuid4().hex[:10]
+    d = os.path.join(STYLE_REF, ref)
+    os.makedirs(d, exist_ok=True)
+    f = request.files.get("file")
+    url = ""
+    if f:
+        ext = os.path.splitext(f.filename or "")[1].lower() or ".mp4"
+        f.save(os.path.join(d, "source" + ext))
+    else:
+        url = (request.form.get("url") or "").strip()
+        if not url:
+            abort(400)
+    return jsonify(job=start_job(analyze_style, ref, url))
 
 
 @app.get("/media/<vid>")
@@ -830,6 +980,7 @@ if __name__ == "__main__":
     for kind in SOUND_DIRS.values():
         for _, sub in kind:
             os.makedirs(os.path.join(SOUNDS, sub), exist_ok=True)
+    os.makedirs(FONTS, exist_ok=True)
     print(f"\n  ClipForge is running at http://127.0.0.1:{PORT}")
     print("  Keep this window open while you use the app. Close it to quit.\n")
     if not os.environ.get("CLIPFORGE_NO_BROWSER"):
