@@ -68,7 +68,7 @@ async function edNew() {
   ed.sel = null;
   ed.time = 0;
   $("#edUndo").disabled = true;
-  $("#edMuteNew").checked = !!(ed.style && ed.style.mute_clips);
+  $("#edAudioNew").value = (ed.style && ed.style.audio) || "keep";
   $("#edName").value = ed.p.name;
   $("#edOpen").value = "";
   $("#edResultPanel").classList.add("hidden");
@@ -103,9 +103,31 @@ async function edSave(quiet) {
 function addClip(meta) {
   ed.media[meta.id] = meta;
   snapshot();
+  const audio = $("#edAudioNew").value;
   ed.p.clips.push({ id: uid(), media: meta.id, in: 0, out: Math.round(meta.duration * 100) / 100, volume: 1,
-    muted: $("#edMuteNew").checked, framing: (ed.style && ed.style.framing) || "fill", media_duration: meta.duration });
+    audio, framing: (ed.style && ed.style.framing) || "fill", media_duration: meta.duration });
   refresh();
+  if (audio === "voice") ensureVoices(meta.id);
+}
+const audioMode = (c) => c.audio || (c.muted ? "mute" : "keep");
+const voicing = new Set();  // media ids being cleaned right now
+async function ensureVoices(mid) {
+  const m = ed.media[mid];
+  if (!m || m.voice || voicing.has(mid)) return;
+  if (!m.has_audio) return;
+  voicing.add(mid);
+  const prog = $("#edBinProgress");
+  try {
+    const { job } = await api("/api/editor/voice", { media: mid });
+    await waitJob(job, prog);
+    m.voice = true;
+    setProgress(prog, 1, `Background music removed from "${m.title}".`);
+  } catch (e) {
+    setProgress(prog, 0, errText(e.message));
+  } finally {
+    voicing.delete(mid);
+    refresh();
+  }
 }
 function renderBin() {
   const used = new Set(ed.p.clips.map((c) => c.media));
@@ -241,7 +263,10 @@ function renderTimeline() {
   ed.p.clips.forEach((c, i) => {
     const m = ed.media[c.media];
     const b = block("clip", c.id, starts[i], clipLen(c), m ? m.title : "Missing clip");
-    if (c.muted || !(m && m.has_audio)) b.insertAdjacentHTML("beforeend", `<span class="muted-tag">no audio</span>`);
+    const mode = audioMode(c);
+    const tag = !(m && m.has_audio) || mode === "mute" ? "no audio"
+      : mode === "voice" ? (m.voice ? "voices only" : "removing music...") : "";
+    if (tag) b.insertAdjacentHTML("beforeend", `<span class="muted-tag">${tag}</span>`);
     addHandles(b, c, "clip");
     lane.appendChild(b);
   });
@@ -444,7 +469,8 @@ function renderInspector() {
     box.insertAdjacentHTML("beforeend", `<p class="small"><b>${m.title.replace(/</g, "&lt;")}</b><br><span class="muted">Source is ${m.duration.toFixed(1)}s long</span></p>`);
     add(field("Start in source", fmt(item.in), "time", (v) => { item.in = Math.min(Math.max(0, v), item.out - 0.3); }),
       field("End in source", fmt(item.out), "time", (v) => { item.out = Math.max(Math.min(m.duration, v), item.in + 0.3); }),
-      field("Remove original audio", item.muted, "bool", (v) => { item.muted = v; }, { wide: true }),
+      field("Original audio", audioMode(item), "select", (v) => { item.audio = v; delete item.muted; if (v === "voice") ensureVoices(item.media); },
+        { options: [["keep", "Keep everything"], ["voice", "Remove background music (keep voices)"], ["mute", "Mute"]], wide: true }),
       field("Volume", item.volume, "pct", (v) => { item.volume = v; }, { max: 150 }),
       field("Framing", item.framing || "fill", "select", (v) => { item.framing = v; },
         { options: [["fill", "Fill the screen"], ["fit", "Whole frame + blur"]] }));
@@ -526,9 +552,23 @@ function syncVideo(force) {
     video.currentTime = want;
   }
   video.classList.toggle("fit", hit.c.framing === "fit");
-  video.volume = Math.min(1, hit.c.muted ? 0 : hit.c.volume);
-  video.muted = hit.c.muted || hit.c.volume === 0;
+  const mode = audioMode(hit.c);
+  // "Voices only": play the cleaned track in sync and silence the video's own audio.
+  const useVoice = mode === "voice" && m.voice;
+  video.volume = Math.min(1, mode === "mute" ? 0 : hit.c.volume);
+  video.muted = mode === "mute" || hit.c.volume === 0 || useVoice;
+  if (useVoice) {
+    const url = `/voice/${m.id}`;
+    if (!voiceEl.src.endsWith(url)) voiceEl.src = url;
+    voiceEl.volume = Math.min(1, hit.c.volume);
+    if (force || Math.abs(voiceEl.currentTime - want) > 0.3) voiceEl.currentTime = want;
+    if (ed.playing && voiceEl.paused) voiceEl.play().catch(() => {});
+    if (!ed.playing && !voiceEl.paused) voiceEl.pause();
+  } else if (!voiceEl.paused) {
+    voiceEl.pause();
+  }
 }
+const voiceEl = new Audio();
 function renderStage() {
   const stage = $("#edStage");
   const scale = stage.clientWidth / 1080;
@@ -619,6 +659,7 @@ function stop() {
   ed.playing = false;
   $("#edPlay").textContent = "Play";
   video.pause();
+  voiceEl.pause();
   if (music) { music.pause(); music = null; }
 }
 $("#edPlay").onclick = () => (ed.playing ? stop() : play());

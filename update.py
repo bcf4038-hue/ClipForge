@@ -67,7 +67,7 @@ def main():
         if sha != current:
             print(f"  Updating ClipForge: {message}")
             if install(sha):
-                print("  Installing new packages (one time, may take a minute)...")
+                print("  Installing new packages (one time; big updates can take several minutes)...")
                 subprocess.run([sys.executable, "-m", "pip", "install", "-q", "-r",
                                 os.path.join(ROOT, "requirements.txt")])
             print("  Updated.")

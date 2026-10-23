@@ -5,3 +5,4 @@ opencv-python-headless>=4.9,<5
 numpy
 faster-whisper>=1.0
 edge-tts>=7.0
+demucs>=4.0

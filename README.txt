@@ -21,8 +21,12 @@ automatically. Your settings, API key, sounds, clips and history are never touch
 EDITOR (edit it exactly how you want)
 -------------------------------------
 Home > Editor.
-- Clips tab: paste YouTube / TikTok / Instagram links (or upload files). Tick
-  "Remove original audio" first if you want clean, raw clips.
+- Clips tab: paste YouTube / TikTok / Instagram links (or upload files). Pick
+  "Audio of new clips" first:
+    Keep everything / Remove background music (keep voices) / Mute
+  You can change it per clip later. "Remove background music" uses a free AI
+  (Demucs) on your PC: great for talking over music; game sound effects get
+  partly removed too. It takes ~10-60 s per clip the first time, then it's saved.
 - Timeline: drag clips to reorder, drag their edges to trim, click to move the
   playhead. Split = S, Delete = Delete key, Undo = Ctrl+Z, Play = Space.
 - Text tab: add a title, a big number, a label or plain text. Click it on the

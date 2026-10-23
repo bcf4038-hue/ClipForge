@@ -1,7 +1,8 @@
 """ClipForge Editor: timeline projects, rendering them to 9:16 video, and learning the user's habits.
 
 A project is plain JSON:
-    clips:  video track, played in order   {id, media, in, out, volume, muted, framing}
+    clips:  video track, played in order   {id, media, in, out, volume, audio, framing}
+            audio: "keep" (everything), "voice" (background music removed) or "mute"
     texts:  text overlays                  {id, text, start, end, font, size, color, outline,
                                             outline_color, box, box_color, box_opacity, x, y, anim, uppercase}
     sounds: sound effects                  {id, sound, start, volume}
@@ -32,6 +33,11 @@ def new_id():
 def new_project():
     return {"id": uuid.uuid4().hex[:10], "name": "Untitled", "clips": [], "texts": [], "sounds": [],
             "music": None, "updated": time.time()}
+
+
+def audio_mode(c):
+    """keep / voice / mute; older projects only had a "muted" flag."""
+    return c.get("audio") or ("mute" if c.get("muted") else "keep")
 
 
 def clip_len(c):
@@ -94,7 +100,7 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
 
 
 def render_project(p, media_path, sound_path, out_path, workdir, ffmpeg="ffmpeg", ffprobe="ffprobe",
-                   fonts_dir=None, progress=lambda f: None):
+                   fonts_dir=None, progress=lambda f: None, voice_path=None):
     """Render the whole timeline to a 1080x1920 MP4."""
     if not p["clips"]:
         raise RuntimeError("Add at least one clip to the timeline first.")
@@ -118,8 +124,15 @@ def render_project(p, media_path, sound_path, out_path, workdir, ffmpeg="ffmpeg"
         else:
             filters.append(f"[{idx}:v]trim={a:.3f}:{b:.3f},setpts=PTS-STARTPTS,{cover},fps=30,setsar=1,"
                            f"format=yuv420p[v{i}]")
-        volume = 0.0 if c.get("muted") else float(c.get("volume", 1.0))
-        if has_audio and volume > 0:
+        mode = audio_mode(c)
+        volume = 0.0 if mode == "mute" else float(c.get("volume", 1.0))
+        voices = voice_path(c["media"]) if (mode == "voice" and voice_path) else None
+        if voices and volume > 0:
+            # Same timeline as the source, so the same trim lines it up.
+            vidx = len(inputs) // 2
+            inputs += ["-i", os.path.abspath(voices)]
+            filters.append(f"[{vidx}:a]atrim={a:.3f}:{b:.3f},asetpts=PTS-STARTPTS,{fmt},volume={volume:.3f}[a{i}]")
+        elif has_audio and volume > 0:
             filters.append(f"[{idx}:a]atrim={a:.3f}:{b:.3f},asetpts=PTS-STARTPTS,{fmt},volume={volume:.3f}[a{i}]")
         else:
             filters.append(f"anullsrc=r=48000:cl=stereo,atrim=0:{b - a:.3f}[a{i}]")
@@ -189,7 +202,7 @@ def summarize(p):
                        abs(start - c) <= 0.4), default=0.0, key=abs), 2), "volume": float(s.get("volume", 0.8))})
     music = p.get("music") or {}
     return {"id": p["id"], "when": time.time(), "clip_lengths": [round(clip_len(c), 2) for c in p["clips"]],
-            "muted": [bool(c.get("muted")) for c in p["clips"]],
+            "audio": [audio_mode(c) for c in p["clips"]],
             "framing": [c.get("framing", "fill") for c in p["clips"]], "texts": texts, "sounds": sounds,
             "music": {"sound": music.get("sound"), "volume": music.get("volume")} if music.get("sound") else None}
 
@@ -226,7 +239,8 @@ def my_style(profile_path):
         return None
     n = len(history)
     lengths = [x for h in history for x in h["clip_lengths"]]
-    muted = [x for h in history for x in h["muted"]]
+    # Older history entries stored a muted flag instead of an audio mode.
+    audio = [x for h in history for x in h.get("audio") or ["mute" if m else "keep" for m in h.get("muted", [])]]
     framing = [x for h in history for x in h.get("framing", [])]
     titles = [t["style"] for h in history for t in h["texts"] if t["role"] == "title"]
     per_clip = [t for h in history for t in h["texts"] if t["role"] == "per_clip"]
@@ -252,7 +266,7 @@ def my_style(profile_path):
     return {
         "projects": n,
         "clip_length": round(statistics.median(lengths), 1) if lengths else 5.0,
-        "mute_clips": sum(muted) > len(muted) / 2 if muted else False,
+        "audio": Counter(audio).most_common(1)[0][0] if audio else "keep",
         "framing": Counter(framing).most_common(1)[0][0] if framing else "fill",
         "title": _most_common_style(titles) if len(titles) >= max(1, n / 2) else None,
         "per_clip": _most_common_style([t["style"] for t in per_clip]) if per_clip else None,
@@ -270,7 +284,8 @@ def arrange(p, style, picks=None):
         start = picks.get(c["id"], float(c["in"]))
         c["in"] = round(start, 2)
         c["out"] = round(min(start + style["clip_length"], c.get("media_duration", start + style["clip_length"])), 2)
-        c["muted"] = style["mute_clips"]
+        c["audio"] = style.get("audio", "keep")
+        c.pop("muted", None)
         c["framing"] = style["framing"]
     total = duration(p)
     p["texts"], p["sounds"] = [], []

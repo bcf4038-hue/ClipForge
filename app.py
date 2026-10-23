@@ -662,6 +662,56 @@ def api_editor_delete():
     return jsonify(ok=True)
 
 
+separate_lock = threading.Lock()
+
+
+def voice_file(mid):
+    """The music-removed audio for a media clip, or None if it hasn't been made yet."""
+    path = os.path.join(LINKS, f"{mid}.voices.wav") if re.fullmatch(r"[0-9a-f]{12}", mid or "") else ""
+    return path if path and os.path.exists(path) else None
+
+
+def make_voices(update, mid):
+    """Remove the background music from one clip, once; the result is reused from then on."""
+    if voice_file(mid):
+        return {"media": mid, "voice": True}
+    src = link_path(mid)
+    with separate_lock:  # one at a time: it uses all CPU cores
+        update(0.05, "Removing background music (first time downloads the model, ~80 MB)...")
+        try:
+            from clipforge import separate
+        except ImportError as e:
+            raise RuntimeError("The music remover isn't installed yet. Close ClipForge and open start.bat "
+                               "again so it can finish installing.") from e
+        tmp = os.path.join(LINKS, f"{mid}.voices.tmp.wav")
+        separate.keep_voices(src, tmp, FFMPEG, lambda f: update(0.05 + 0.9 * f, "Removing background music..."))
+        os.replace(tmp, os.path.join(LINKS, f"{mid}.voices.wav"))
+    meta_path = os.path.join(LINKS, mid + ".json")
+    if os.path.exists(meta_path):
+        with open(meta_path) as f:
+            meta = json.load(f)
+        meta["voice"] = True
+        with open(meta_path, "w") as f:
+            json.dump(meta, f)
+    return {"media": mid, "voice": True}
+
+
+@app.post("/api/editor/voice")
+def api_editor_voice():
+    mid = (request.json or {}).get("media", "")
+    if not re.fullmatch(r"[0-9a-f]{12}", mid):
+        abort(400)
+    return jsonify(job=start_job(make_voices, mid))
+
+
+@app.get("/voice/<mid>")
+def serve_voice(mid):
+    path = voice_file(mid)
+    if not path:
+        abort(404)
+    return send_from_directory(LINKS, os.path.basename(path))
+
+
 @app.post("/api/editor/arrange")
 def api_editor_arrange():
     """Re-cut a project in the user's learned style, keeping the most exciting part of each clip."""
@@ -688,7 +738,7 @@ def render_edit(update, p):
         update(0.02, "Rendering your edit...")
         editor.render_project(p, link_path, resolve_sound, os.path.join(OUTPUT, out_name),
                               os.path.join(WORK, "edit_" + p["id"]), FFMPEG, FFPROBE, FONTS,
-                              lambda f: update(f, f"Rendering {int(f * 100)}%"))
+                              lambda f: update(f, f"Rendering {int(f * 100)}%"), voice_path=voice_file)
         editor.record(PROFILE, p)
         return {"file": out_name, "title": p.get("name")}
 
@@ -713,7 +763,7 @@ def link_path(part_id):
     if not re.fullmatch(r"[0-9a-f]{12}", part_id or ""):
         raise RuntimeError("Unknown linked clip.")
     for name in os.listdir(LINKS):
-        if name.startswith(part_id + ".") and not name.endswith(".json"):
+        if name.startswith(part_id + ".") and not name.endswith((".json", ".wav")):
             return os.path.join(LINKS, name)
     raise RuntimeError("A linked clip is missing. Add it again.")
 

@@ -173,7 +173,13 @@
         <div class="row">
           <label class="upload ghost">Upload clips<input id="edUpload" type="file" accept="video/*" multiple hidden></label>
         </div>
-        <label class="check"><input id="edMuteNew" type="checkbox"> Remove original audio (clean, raw clips)</label>
+        <label>Audio of new clips
+          <select id="edAudioNew">
+            <option value="keep">Keep everything</option>
+            <option value="voice">Remove background music (keep voices)</option>
+            <option value="mute">Mute</option>
+          </select>
+        </label>
         <div id="edBinProgress" class="progress hidden"><div class="bar"></div><span></span></div>
         <div id="edMediaList" class="ed-list"></div>
       </div>
