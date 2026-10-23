@@ -18,6 +18,23 @@ UPDATES
 start.bat checks GitHub for a new version every time you open it and installs it
 automatically. Your settings, API key, sounds, clips and history are never touched.
 
+EDITOR (edit it exactly how you want)
+-------------------------------------
+Home > Editor.
+- Clips tab: paste YouTube / TikTok / Instagram links (or upload files). Tick
+  "Remove original audio" first if you want clean, raw clips.
+- Timeline: drag clips to reorder, drag their edges to trim, click to move the
+  playhead. Split = S, Delete = Delete key, Undo = Ctrl+Z, Play = Space.
+- Text tab: add a title, a big number, a label or plain text. Click it on the
+  timeline to change font, size, colors, outline, box and animation. Drag it on
+  the preview to move it; drag its edges on the timeline to set when it shows.
+- Sounds tab: "+ Add" puts a sound effect at the playhead; "Use" sets the music.
+- Save keeps the project. Render video makes the MP4 (also saved in output).
+LEARNS YOUR STYLE: every Save and Render teaches ClipForge how you edit (clip
+lengths, text looks, which sounds you put on cuts, music volume, muted clips).
+"Auto-edit in my style" then re-cuts a new project the way you usually do it.
+Ctrl+Z undoes it if you don't like it.
+
 TOP LIST FROM LINKS (fastest way to a Top 5)
 --------------------------------------------
 On the home screen click "Top List from Links". Pick Top 3/5/7/10, type the title,

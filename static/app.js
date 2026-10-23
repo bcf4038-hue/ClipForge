@@ -905,7 +905,7 @@ $("#labSave").onclick = async () => {
 $("#mode").onchange = () => $("#clipLenWrap").classList.toggle("hidden", $("#mode").value !== "hype");
 
 // ---------- screens ----------
-const VIEWS = ["home", "toplinks", "long", "montage", "lab", "styles"];
+const VIEWS = ["home", "toplinks", "long", "montage", "lab", "styles", "edit"];
 function showView(name) {
   VIEWS.forEach((v) => $(`#view-${v}`).classList.toggle("hidden", v !== name));
   $("#workspace").classList.toggle("hidden", name !== "editor");
@@ -913,6 +913,8 @@ function showView(name) {
   window.scrollTo(0, 0);
   if (name === "lab") drawWave();
   if (name === "styles") stPreview();
+  if (name === "edit" && window.edOnShow) window.edOnShow();
+  if (name !== "edit" && window.edOnHide) window.edOnHide();
 }
 document.querySelectorAll(".tile").forEach((t) => { t.onclick = () => showView(t.dataset.view); });
 $("#homeBtn").onclick = () => showView("home");

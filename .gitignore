@@ -3,6 +3,8 @@ config.json
 cookies.txt
 usage.json
 styles.json
+profile.json
+projects/
 .version
 
 # Working files and finished clips

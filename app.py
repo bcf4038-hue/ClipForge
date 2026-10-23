@@ -13,7 +13,7 @@ import webbrowser
 
 from flask import Flask, abort, jsonify, request, send_from_directory
 
-from clipforge import ai, autopick, captions, hype, render, soundlab, styles, tts, youtube
+from clipforge import ai, autopick, captions, editor, hype, render, soundlab, styles, tts, youtube
 
 ROOT = os.path.dirname(os.path.abspath(__file__))
 WORK = os.path.join(ROOT, "work")
@@ -24,6 +24,8 @@ COOKIES = os.path.join(ROOT, "cookies.txt")
 USAGE = os.path.join(ROOT, "usage.json")
 DEFAULT_BUDGET = 20.0
 STYLES = os.path.join(ROOT, "styles.json")
+PROJECTS = os.path.join(ROOT, "projects")
+PROFILE = os.path.join(ROOT, "profile.json")
 FONTS = os.path.join(ROOT, "fonts")
 BROWSERS = ("firefox", "chrome", "edge", "brave")
 SOUND_DIRS = {
@@ -549,9 +551,17 @@ def fetch_link(update, url, start, end):
                                "close ClipForge and open start.bat again (it updates the downloader), or try "
                                "the link from TikTok's Share > Copy link. Details: " + str(e)[:200]) from e
         raise
-    real = render.probe(path, FFPROBE)[2]
-    return {"id": part_id, "title": info.get("title") or url, "duration": real,
+    return save_media_meta(part_id, path, info.get("title") or url)
+
+
+def save_media_meta(part_id, path, title):
+    """Probe a downloaded or uploaded clip once and remember its size, length and audio."""
+    w, h, real, has_audio = render.probe(path, FFPROBE)
+    meta = {"id": part_id, "title": title, "duration": real, "width": w, "height": h, "has_audio": has_audio,
             "media": f"/linkpart/{os.path.basename(path)}"}
+    with open(os.path.join(LINKS, part_id + ".json"), "w") as f:
+        json.dump(meta, f)
+    return meta
 
 
 @app.post("/api/montage/fetch")
@@ -562,6 +572,134 @@ def api_montage_fetch():
         abort(400)
     to_num = lambda v: float(v) if v not in (None, "") else None
     return jsonify(job=start_job(fetch_link, url, to_num(body.get("start")), to_num(body.get("end"))))
+
+
+# ---------- editor ----------
+
+def project_path(pid):
+    if not re.fullmatch(r"[0-9a-f]{10}", pid or ""):
+        abort(400)
+    return os.path.join(PROJECTS, pid + ".json")
+
+
+@app.post("/api/editor/upload")
+def api_editor_upload():
+    f = request.files.get("file")
+    if not f:
+        abort(400)
+    part_id = uuid.uuid4().hex[:12]
+    os.makedirs(LINKS, exist_ok=True)
+    ext = os.path.splitext(f.filename or "")[1].lower() or ".mp4"
+    path = os.path.join(LINKS, part_id + ext)
+    f.save(path)
+    try:
+        return jsonify(save_media_meta(part_id, path, os.path.splitext(f.filename or "Upload")[0]))
+    except subprocess.CalledProcessError:
+        os.remove(path)
+        return jsonify(error="That file doesn't look like a video ClipForge can read."), 400
+
+
+@app.post("/api/editor/media")
+def api_editor_media():
+    """Info for each media id in a project (missing ones are left out)."""
+    out = {}
+    for mid in (request.json or {}).get("ids", []):
+        meta = os.path.join(LINKS, f"{mid}.json") if re.fullmatch(r"[0-9a-f]{12}", mid or "") else ""
+        if meta and os.path.exists(meta):
+            with open(meta) as f:
+                out[mid] = json.load(f)
+    return jsonify(media=out)
+
+
+@app.get("/api/editor/projects")
+def api_editor_projects():
+    os.makedirs(PROJECTS, exist_ok=True)
+    items = []
+    for name in os.listdir(PROJECTS):
+        try:
+            with open(os.path.join(PROJECTS, name)) as f:
+                p = json.load(f)
+            items.append({"id": p["id"], "name": p.get("name", "Untitled"), "updated": p.get("updated", 0),
+                          "clips": len(p.get("clips", []))})
+        except (OSError, ValueError, KeyError):
+            continue
+    return jsonify(projects=sorted(items, key=lambda x: -x["updated"]), style=editor.my_style(PROFILE))
+
+
+@app.get("/api/editor/project/<pid>")
+def api_editor_project(pid):
+    path = project_path(pid)
+    if not os.path.exists(path):
+        abort(404)
+    with open(path) as f:
+        return jsonify(project=json.load(f))
+
+
+@app.get("/api/editor/new")
+def api_editor_new():
+    return jsonify(project=editor.new_project(), style=editor.my_style(PROFILE))
+
+
+@app.post("/api/editor/save")
+def api_editor_save():
+    p = (request.json or {}).get("project")
+    if not p:
+        abort(400)
+    path = project_path(p.get("id"))
+    p["updated"] = time.time()
+    os.makedirs(PROJECTS, exist_ok=True)
+    with open(path, "w") as f:
+        json.dump(p, f)
+    editor.record(PROFILE, p)  # every save teaches ClipForge a bit more about your style
+    return jsonify(ok=True, style=editor.my_style(PROFILE))
+
+
+@app.post("/api/editor/delete")
+def api_editor_delete():
+    path = project_path((request.json or {}).get("id"))
+    if os.path.exists(path):
+        os.remove(path)
+    return jsonify(ok=True)
+
+
+@app.post("/api/editor/arrange")
+def api_editor_arrange():
+    """Re-cut a project in the user's learned style, keeping the most exciting part of each clip."""
+    p = (request.json or {}).get("project")
+    style = editor.my_style(PROFILE)
+    if not p or not p.get("clips"):
+        return jsonify(error="Add some clips to the timeline first."), 400
+    if not style:
+        return jsonify(error="ClipForge hasn't learned your style yet. Edit a video the way you like it and "
+                             "click Save once, then try again."), 400
+    try:
+        paths = [link_path(c["media"]) for c in p["clips"]]
+        picks, _ = autopick.pick(paths, style["clip_length"] * len(paths), FFMPEG)
+        best = {c["id"]: pk["start"] for c, pk in zip(p["clips"], picks)}
+    except (RuntimeError, subprocess.CalledProcessError):
+        best = {}
+    return jsonify(project=editor.arrange(p, style, best))
+
+
+def render_edit(update, p):
+    with render_lock:
+        os.makedirs(OUTPUT, exist_ok=True)
+        out_name = f"{safe_name(p.get('name') or 'edit')}_{p['id']}.mp4"
+        update(0.02, "Rendering your edit...")
+        editor.render_project(p, link_path, resolve_sound, os.path.join(OUTPUT, out_name),
+                              os.path.join(WORK, "edit_" + p["id"]), FFMPEG, FFPROBE, FONTS,
+                              lambda f: update(f, f"Rendering {int(f * 100)}%"))
+        editor.record(PROFILE, p)
+        return {"file": out_name, "title": p.get("name")}
+
+
+@app.post("/api/editor/render")
+def api_editor_render():
+    p = (request.json or {}).get("project")
+    if not p:
+        abort(400)
+    project_path(p.get("id"))
+    return jsonify(job=start_job(render_edit, p))
 
 
 @app.get("/linkpart/<name>")
@@ -575,7 +713,7 @@ def link_path(part_id):
     if not re.fullmatch(r"[0-9a-f]{12}", part_id or ""):
         raise RuntimeError("Unknown linked clip.")
     for name in os.listdir(LINKS):
-        if name.startswith(part_id + "."):
+        if name.startswith(part_id + ".") and not name.endswith(".json"):
             return os.path.join(LINKS, name)
     raise RuntimeError("A linked clip is missing. Add it again.")
 
