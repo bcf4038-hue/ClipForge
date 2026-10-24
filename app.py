@@ -642,15 +642,19 @@ def api_editor_new():
 
 @app.post("/api/editor/save")
 def api_editor_save():
-    p = (request.json or {}).get("project")
+    body = request.json or {}
+    p = body.get("project")
     if not p:
         abort(400)
     path = project_path(p.get("id"))
     p["updated"] = time.time()
     os.makedirs(PROJECTS, exist_ok=True)
-    with open(path, "w") as f:
+    # Write to a temp file first so a crash mid-save can never corrupt the project.
+    with open(path + ".tmp", "w") as f:
         json.dump(p, f)
-    editor.record(PROFILE, p)  # every save teaches ClipForge a bit more about your style
+    os.replace(path + ".tmp", path)
+    if not body.get("autosave"):
+        editor.record(PROFILE, p)  # a real Save teaches ClipForge your style; autosaves don't
     return jsonify(ok=True, style=editor.my_style(PROFILE))
 
 
@@ -731,25 +735,37 @@ def api_editor_arrange():
     return jsonify(project=editor.arrange(p, style, best))
 
 
-def render_edit(update, p):
+def render_edit(update, p, images):
     with render_lock:
         os.makedirs(OUTPUT, exist_ok=True)
         out_name = f"{safe_name(p.get('name') or 'edit')}_{p['id']}.mp4"
+        workdir = os.path.join(WORK, "edit_" + p["id"])
+        os.makedirs(workdir, exist_ok=True)
+        # The browser drew each text exactly as the preview shows it; save them as PNGs.
+        text_images = {}
+        for tid, data in (images or {}).items():
+            if not re.fullmatch(r"[0-9a-f]{6,16}", tid or "") or not str(data).startswith("data:image/png;base64,"):
+                continue
+            path = os.path.join(workdir, f"text_{tid}.png")
+            with open(path, "wb") as f:
+                f.write(base64.b64decode(data.split(",", 1)[1]))
+            text_images[tid] = path
         update(0.02, "Rendering your edit...")
-        editor.render_project(p, link_path, resolve_sound, os.path.join(OUTPUT, out_name),
-                              os.path.join(WORK, "edit_" + p["id"]), FFMPEG, FFPROBE, FONTS,
-                              lambda f: update(f, f"Rendering {int(f * 100)}%"), voice_path=voice_file)
+        editor.render_project(p, link_path, resolve_sound, os.path.join(OUTPUT, out_name), workdir,
+                              FFMPEG, FFPROBE, FONTS, lambda f: update(f, f"Rendering {int(f * 100)}%"),
+                              voice_path=voice_file, text_images=text_images)
         editor.record(PROFILE, p)
         return {"file": out_name, "title": p.get("name")}
 
 
 @app.post("/api/editor/render")
 def api_editor_render():
-    p = (request.json or {}).get("project")
+    body = request.json or {}
+    p = body.get("project")
     if not p:
         abort(400)
     project_path(p.get("id"))
-    return jsonify(job=start_job(render_edit, p))
+    return jsonify(job=start_job(render_edit, p, body.get("text_images") or {}))
 
 
 @app.get("/linkpart/<name>")

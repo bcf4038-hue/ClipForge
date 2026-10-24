@@ -569,26 +569,34 @@ function syncVideo(force) {
   }
 }
 const voiceEl = new Audio();
+// The preview shows the very same images the export uses, so the two always match.
+const textCache = new Map();  // look of a text -> {url, w, h}
+function textImage(t) {
+  const key = JSON.stringify(["text", "font", "size", "color", "outline", "outline_color", "box", "box_color",
+    "box_opacity", "uppercase"].map((k) => t[k]));
+  if (!textCache.has(key)) {
+    if (textCache.size > 300) textCache.clear();
+    textCache.set(key, rasterText(t));
+  }
+  return textCache.get(key);
+}
+document.fonts.addEventListener("loadingdone", () => { textCache.clear(); if (ed.p) renderStage(); });
 function renderStage() {
   const stage = $("#edStage");
   const scale = stage.clientWidth / 1080;
   const box = $("#edTexts");
   box.innerHTML = "";
-  ed.p.texts.filter((t) => ed.time >= t.start && ed.time < t.end).forEach((t) => {
-    const el = document.createElement("div");
+  ed.p.texts.filter((t) => ed.time >= t.start && ed.time < t.end && String(t.text || "").trim()).forEach((t) => {
+    const img = textImage(t);
+    const el = document.createElement("img");
     el.className = `ed-text${ed.sel && ed.sel.type === "text" && ed.sel.id === t.id ? " sel" : ""}`;
-    el.textContent = t.uppercase ? t.text.toUpperCase() : t.text;
+    el.src = img.url;
+    el.alt = t.text;
+    el.draggable = false;
     el.style.left = `${t.x * 100}%`;
     el.style.top = `${t.y * 100}%`;
-    el.style.fontFamily = `"${t.font}", "Arial Black", sans-serif`;
-    el.style.fontSize = `${t.size * scale}px`;
-    el.style.color = t.color;
-    el.style.webkitTextStroke = t.box ? "" : `${t.outline * scale * 2}px ${t.outline_color}`;
-    if (t.box) {
-      const a = Math.round(t.box_opacity * 255).toString(16).padStart(2, "0");
-      el.style.background = `${t.box_color}${a}`;
-      el.style.padding = `${12 * scale}px ${18 * scale}px`;
-    }
+    el.style.width = `${img.w * scale}px`;
+    el.style.height = `${img.h * scale}px`;
     el.dataset.id = t.id;
     box.appendChild(el);
   });
@@ -668,7 +676,7 @@ $("#edDelete").onclick = deleteSel;
 $("#edUndo").onclick = undo;
 $("#edNew").onclick = () => { stop(); edNew(); };
 $("#edOpen").onchange = () => { stop(); edOpen($("#edOpen").value); };
-$("#edName").oninput = () => { ed.p.name = $("#edName").value; };
+$("#edName").oninput = () => { ed.p.name = $("#edName").value; scheduleAutosave(); };
 $("#edSave").onclick = () => edSave(false).catch((e) => setProgress($("#edBinProgress"), 0, errText(e.message)));
 $("#edArrange").onclick = async () => {
   try {
@@ -689,7 +697,9 @@ $("#edRender").onclick = async () => {
   $("#edRender").disabled = true;
   try {
     await edSave(true);
-    const { job } = await api("/api/editor/render", { project: ed.p });
+    setProgress(prog, 0.01, "Drawing your text...");
+    const text_images = await rasterTexts();
+    const { job } = await api("/api/editor/render", { project: ed.p, text_images });
     const r = await waitJob(job, prog);
     setProgress(prog, 1, "Done! Saved in the output folder.");
     $("#edResults").innerHTML = `<div class="result"><video src="/output/${encodeURIComponent(r.file)}?t=${Date.now()}" controls preload="metadata"></video>
@@ -712,7 +722,78 @@ document.addEventListener("keydown", (e) => {
   else if (e.key.toLowerCase() === "z" && (e.ctrlKey || e.metaKey)) { e.preventDefault(); undo(); }
 });
 
+// ---------- exact text for the export ----------
+// The export uses these images, drawn by the same browser that draws the preview, so fonts,
+// outlines and color emoji come out exactly as you see them.
+function hexAlpha(hex, opacity) {
+  const h = hex.replace("#", "");
+  return `rgba(${parseInt(h.slice(0, 2), 16)}, ${parseInt(h.slice(2, 4), 16)}, ${parseInt(h.slice(4, 6), 16)}, ${opacity})`;
+}
+function rasterText(t) {
+  const text = t.uppercase ? t.text.toUpperCase() : t.text;
+  const lines = text.split("\n");
+  const font = `${t.size}px "${t.font}", "Arial Black", sans-serif`;
+  const canvas = document.createElement("canvas");
+  const g = canvas.getContext("2d");
+  g.font = font;
+  const lineH = t.size * 1.1;  // matches the preview's line-height
+  const stroke = t.box ? 0 : t.outline * 2;
+  const padX = (t.box ? 18 : 6) + stroke / 2, padY = (t.box ? 12 : 2) + stroke / 2;
+  const width = Math.max(...lines.map((l) => g.measureText(l).width), 1);
+  canvas.width = Math.ceil(width + padX * 2);
+  canvas.height = Math.ceil(lineH * lines.length + padY * 2);
+  g.font = font;
+  g.textAlign = "center";
+  g.textBaseline = "middle";
+  if (t.box) {
+    g.fillStyle = hexAlpha(t.box_color, t.box_opacity);
+    g.fillRect(0, 0, canvas.width, canvas.height);
+  }
+  lines.forEach((line, i) => {
+    const y = padY + lineH * (i + 0.5);
+    if (stroke) {
+      g.lineJoin = "round";
+      g.lineWidth = stroke;
+      g.strokeStyle = t.outline_color;
+      g.strokeText(line, canvas.width / 2, y);
+    }
+    g.fillStyle = t.color;
+    g.fillText(line, canvas.width / 2, y);
+  });
+  return { url: canvas.toDataURL("image/png"), w: canvas.width, h: canvas.height };
+}
+async function rasterTexts() {
+  const out = {};
+  for (const t of ed.p.texts) {
+    if (!String(t.text || "").trim()) continue;
+    try { await document.fonts.load(`${t.size}px "${t.font}"`); } catch (e) { /* use the fallback font */ }
+    out[t.id] = rasterText(t).url;
+  }
+  return out;
+}
+
+// ---------- autosave ----------
+// Saves a few seconds after every change, so closing the page never loses work.
+let autosaveTimer = null, lastSaved = "";
+function scheduleAutosave() {
+  clearTimeout(autosaveTimer);
+  autosaveTimer = setTimeout(async () => {
+    if (!ed.p || !ed.p.clips.length) return;
+    const snap = JSON.stringify(ed.p);
+    if (snap === lastSaved) return;
+    try {
+      ed.p.name = $("#edName").value.trim() || "Untitled";
+      await api("/api/editor/save", { project: ed.p, autosave: true });
+      lastSaved = snap;
+      $("#edSaved").textContent = `Autosaved ${new Date().toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })}`;
+    } catch (e) {
+      $("#edSaved").textContent = "Autosave failed. Click Save.";
+    }
+  }, 2500);
+}
+
 function refresh() {
+  scheduleAutosave();
   if (ed.time > total()) ed.time = total();
   renderBin();
   renderTimeline();
@@ -724,7 +805,10 @@ window.edOnShow = async () => {
   if (!ed.ready) {
     ed.ready = true;
     await edLoadList();
-    await edNew();
+    // Pick up where you left off: open the most recent project if there is one.
+    const latest = [...$("#edOpen").options].find((o) => o.value);
+    if (latest) { await edOpen(latest.value); $("#edOpen").value = latest.value; }
+    else await edNew();
   } else {
     refresh();
   }

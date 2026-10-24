@@ -100,8 +100,14 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
 
 
 def render_project(p, media_path, sound_path, out_path, workdir, ffmpeg="ffmpeg", ffprobe="ffprobe",
-                   fonts_dir=None, progress=lambda f: None, voice_path=None):
-    """Render the whole timeline to a 1080x1920 MP4."""
+                   fonts_dir=None, progress=lambda f: None, voice_path=None, text_images=None):
+    """Render the whole timeline to a 1080x1920 MP4.
+
+    text_images: {text id: png path}. The editor draws each text in the browser exactly as the
+    preview shows it (fonts, outline, color emoji), and those images are placed here at the same
+    spot and time. Texts without an image fall back to the subtitle renderer.
+    """
+    text_images = text_images or {}
     if not p["clips"]:
         raise RuntimeError("Add at least one clip to the timeline first.")
     os.makedirs(workdir, exist_ok=True)
@@ -111,7 +117,7 @@ def render_project(p, media_path, sound_path, out_path, workdir, ffmpeg="ffmpeg"
     for i, c in enumerate(p["clips"]):
         path = media_path(c["media"])
         _, _, _, has_audio = probe(path, ffprobe)
-        idx = len(inputs) // 2
+        idx = inputs.count("-i")  # next input's number
         inputs += ["-i", os.path.abspath(path)]
         a, b = float(c["in"]), float(c["out"])
         cover = f"scale={W}:{H}:force_original_aspect_ratio=increase,crop={W}:{H}"
@@ -129,7 +135,7 @@ def render_project(p, media_path, sound_path, out_path, workdir, ffmpeg="ffmpeg"
         voices = voice_path(c["media"]) if (mode == "voice" and voice_path) else None
         if voices and volume > 0:
             # Same timeline as the source, so the same trim lines it up.
-            vidx = len(inputs) // 2
+            vidx = inputs.count("-i")  # next input's number
             inputs += ["-i", os.path.abspath(voices)]
             filters.append(f"[{vidx}:a]atrim={a:.3f}:{b:.3f},asetpts=PTS-STARTPTS,{fmt},volume={volume:.3f}[a{i}]")
         elif has_audio and volume > 0:
@@ -139,25 +145,50 @@ def render_project(p, media_path, sound_path, out_path, workdir, ffmpeg="ffmpeg"
         joined.append(f"[v{i}][a{i}]")
     filters.append(f"{''.join(joined)}concat=n={len(joined)}:v=1:a=1[vcat][acat]")
 
+    fallback = {**p, "texts": [t for t in p.get("texts", []) if t["id"] not in text_images]}
     with open(os.path.join(workdir, "texts.ass"), "w", encoding="utf-8") as f:
-        f.write(build_ass(p, total))
+        f.write(build_ass(fallback, total))
     vf = "[vcat]ass=texts.ass"
     if fonts_dir and os.path.isdir(fonts_dir):
         vf += ":fontsdir=" + os.path.relpath(fonts_dir, workdir).replace("\\", "/")
-    filters.append(vf + "[v]")
+    filters.append(vf + "[vtxt]")
+    current = "[vtxt]"
+    for k, t in enumerate(p.get("texts", [])):
+        img = text_images.get(t["id"])
+        start, end = max(0.0, float(t["start"])), min(float(t["end"]), total)
+        if not img or end <= start:
+            continue
+        idx = inputs.count("-i")  # next input's number
+        inputs += ["-loop", "1", "-framerate", "30", "-t", f"{total:.3f}", "-i", os.path.abspath(img)]
+        anim = t.get("anim", "pop")
+        if anim == "pop":
+            # Grows from 35% to full size in 0.18 s, like the preview.
+            grow = f"min(1\\,0.35+0.65*max(0\\,t-{start:.3f})/0.18)"
+            prep = f"format=rgba,scale=w='max(2\\,trunc(iw*{grow}/2)*2)':h=-2:eval=frame"
+        elif anim == "fade":
+            prep = (f"format=rgba,fade=t=in:st={start:.3f}:d=0.2:alpha=1,"
+                    f"fade=t=out:st={max(start, end - 0.2):.3f}:d=0.2:alpha=1")
+        else:
+            prep = "format=rgba"
+        x, y = float(t.get("x", 0.5)) * W, float(t.get("y", 0.2)) * H
+        filters.append(f"[{idx}:v]{prep}[img{k}]")
+        filters.append(f"{current}[img{k}]overlay=x='{x:.1f}-w/2':y='{y:.1f}-h/2':eval=frame:"
+                       f"enable='between(t\\,{start:.3f}\\,{end:.3f})'[vo{k}]")
+        current = f"[vo{k}]"
+    filters.append(f"{current}format=yuv420p[v]")
 
     mix = ["[acat]"]
     for k, s in enumerate(p.get("sounds", [])):
         if float(s["start"]) >= total:
             continue
-        idx = len(inputs) // 2
+        idx = inputs.count("-i")  # next input's number
         inputs += ["-i", os.path.abspath(sound_path(s["sound"]))]
         delay = int(max(float(s["start"]), 0) * 1000)
         filters.append(f"[{idx}:a]{fmt},volume={float(s.get('volume', 0.8)):.3f},adelay=delays={delay}:all=1[s{k}]")
         mix.append(f"[s{k}]")
     music = p.get("music")
     if music and music.get("sound"):
-        idx = len(inputs) // 2
+        idx = inputs.count("-i")  # next input's number
         inputs += ["-stream_loop", "-1", "-i", os.path.abspath(sound_path(music["sound"]))]
         filters.append(f"[{idx}:a]{fmt},volume={float(music.get('volume', 0.2)):.3f},atrim=0:{total:.3f},"
                        f"afade=t=in:d=0.4,afade=t=out:st={max(total - 1.2, 0):.3f}:d=1.2[mus]")
