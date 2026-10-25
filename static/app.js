@@ -48,7 +48,17 @@ const money = (n) => `$${n.toFixed(n < 1 ? 3 : 2)}`;
 function showApproval(jobId, a, what = "Finding clips in this video") {
   const over = a.max > a.remaining;
   $("#approvalWhat").textContent = what;
-  $("#approvalText").innerHTML = `
+  if (a.kind === "eleven") {
+    // ElevenLabs bills in credits from your plan, not dollars.
+    const short = a.chars > a.left;
+    $("#approvalWhat").textContent = "Recording the ElevenLabs voice";
+    $("#approvalText").innerHTML = `
+      <p>This uses about <b>${a.chars.toLocaleString()}</b> ElevenLabs credits.</p>
+      <p>You have <b>${a.left.toLocaleString()}</b> of ${a.limit.toLocaleString()} left this month${a.tier ? ` (${a.tier} plan)` : ""}.</p>
+      ${a.tier === "free" ? `<p class="over">Free plan: you're not allowed to use these voices in monetized videos. Starter or higher allows it.</p>` : ""}
+      ${short ? `<p class="over">Not enough credits left. It will stop partway and nothing extra is charged.</p>` : ""}
+      <p class="muted">Lines already recorded are reused for free.</p>`;
+  } else $("#approvalText").innerHTML = `
     <p>Claude will read about <b>${a.input_tokens.toLocaleString()}</b> tokens.</p>
     <p class="big-cost">Usually ${money(a.low)} to ${money(a.typical_high)}</p>
     <p class="muted">Absolute maximum: ${money(a.max)}</p>
@@ -91,6 +101,8 @@ function wordsText(start, end) {
 async function loadStatus() {
   const s = await api("/api/status");
   $("#keyHint").textContent = s.has_key ? `(saved key ${s.key_hint})` : "(not set)";
+  $("#elHint").textContent = s.has_eleven ? `(saved key ${s.eleven_hint})` : "(not set)";
+  state.hasEleven = s.has_eleven;
   $("#ytBrowser").value = s.yt_browser;
   $("#cookieStatus").textContent = s.has_cookies ? "cookies.txt saved (used instead of the browser login)" : "";
   $("#removeCookies").classList.toggle("hidden", !s.has_cookies);
@@ -106,6 +118,13 @@ $("#saveKey").onclick = async () => {
   $("#apiKey").value = "";
   $("#settings").classList.add("hidden");
   loadStatus();
+};
+
+$("#saveElKey").onclick = async () => {
+  await api("/api/config", { eleven_key: $("#elKey").value });
+  $("#elKey").value = "";
+  await loadStatus();
+  if (window.qzLoadVoices) window.qzLoadVoices(true);
 };
 
 $("#ytBrowser").onchange = () => api("/api/config", { yt_browser: $("#ytBrowser").value }).then(loadStatus);
@@ -905,7 +924,7 @@ $("#labSave").onclick = async () => {
 $("#mode").onchange = () => $("#clipLenWrap").classList.toggle("hidden", $("#mode").value !== "hype");
 
 // ---------- screens ----------
-const VIEWS = ["home", "toplinks", "long", "montage", "lab", "styles", "edit"];
+const VIEWS = ["home", "quiz", "toplinks", "long", "montage", "lab", "styles", "edit"];
 function showView(name) {
   VIEWS.forEach((v) => $(`#view-${v}`).classList.toggle("hidden", v !== name));
   $("#workspace").classList.toggle("hidden", name !== "editor");
@@ -914,6 +933,7 @@ function showView(name) {
   if (name === "lab") drawWave();
   if (name === "styles") stPreview();
   if (name === "edit" && window.edOnShow) window.edOnShow();
+  if (name === "quiz" && window.qzOnShow) window.qzOnShow();
   if (name !== "edit" && window.edOnHide) window.edOnHide();
 }
 document.querySelectorAll(".tile").forEach((t) => { t.onclick = () => showView(t.dataset.view); });

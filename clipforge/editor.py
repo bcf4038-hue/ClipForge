@@ -159,7 +159,8 @@ def render_project(p, media_path, sound_path, out_path, workdir, ffmpeg="ffmpeg"
         if not img or end <= start:
             continue
         idx = inputs.count("-i")  # next input's number
-        inputs += ["-loop", "1", "-framerate", "30", "-t", f"{total:.3f}", "-i", os.path.abspath(img)]
+        # Only as long as the text is on screen, shifted to its start: long videos with many texts stay fast.
+        inputs += ["-loop", "1", "-framerate", "30", "-t", f"{end - start + 0.1:.3f}", "-i", os.path.abspath(img)]
         anim = t.get("anim", "pop")
         if anim == "pop":
             # Grows from 35% to full size in 0.18 s, like the preview.
@@ -171,8 +172,8 @@ def render_project(p, media_path, sound_path, out_path, workdir, ffmpeg="ffmpeg"
         else:
             prep = "format=rgba"
         x, y = float(t.get("x", 0.5)) * W, float(t.get("y", 0.2)) * H
-        filters.append(f"[{idx}:v]{prep}[img{k}]")
-        filters.append(f"{current}[img{k}]overlay=x='{x:.1f}-w/2':y='{y:.1f}-h/2':eval=frame:"
+        filters.append(f"[{idx}:v]setpts=PTS-STARTPTS+{start:.3f}/TB,{prep}[img{k}]")
+        filters.append(f"{current}[img{k}]overlay=x='{x:.1f}-w/2':y='{y:.1f}-h/2':eval=frame:eof_action=pass:"
                        f"enable='between(t\\,{start:.3f}\\,{end:.3f})'[vo{k}]")
         current = f"[vo{k}]"
     filters.append(f"{current}format=yuv420p[v]")

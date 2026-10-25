@@ -13,7 +13,7 @@ import webbrowser
 
 from flask import Flask, abort, jsonify, request, send_from_directory
 
-from clipforge import ai, autopick, captions, editor, hype, render, soundlab, styles, tts, youtube
+from clipforge import ai, autopick, captions, editor, eleven, hype, quiz, render, soundlab, styles, tts, youtube
 
 ROOT = os.path.dirname(os.path.abspath(__file__))
 WORK = os.path.join(ROOT, "work")
@@ -368,8 +368,10 @@ def index():
 def status():
     cfg = load_config()
     key = cfg.get("api_key", "")
+    el = cfg.get("eleven_key", "")
     return jsonify(ffmpeg=bool(FFMPEG and FFPROBE), has_key=bool(key),
                    key_hint=("..." + key[-4:]) if key else "",
+                   has_eleven=bool(el), eleven_hint=("..." + el[-4:]) if el else "",
                    yt_browser=cfg.get("yt_browser", ""), has_cookies=os.path.exists(COOKIES))
 
 
@@ -385,6 +387,9 @@ def set_config():
             cfg["budget"] = max(0.0, float(body["budget"]))
         except (TypeError, ValueError):
             pass
+    eleven_key = body.get("eleven_key", "").strip()
+    if eleven_key:
+        cfg["eleven_key"] = eleven_key
     if "yt_browser" in body:
         cfg["yt_browser"] = body["yt_browser"] if body["yt_browser"] in BROWSERS else ""
     save_config(cfg)
@@ -766,6 +771,140 @@ def api_editor_render():
         abort(400)
     project_path(p.get("id"))
     return jsonify(job=start_job(render_edit, p, body.get("text_images") or {}))
+
+
+# ---------- quiz shorts ----------
+
+VOICE_LINES = os.path.join(SOUNDS, "voice_lines")
+QUIZ_BG_ID = "0b9c1200a002"  # the built-in animated background, made once
+QUIZ_BG_SECONDS = 120
+
+
+def quiz_background(update=lambda *a: None):
+    """A slowly turning teal-to-purple gradient, as an Editor clip. Made small; the Editor scales it up."""
+    os.makedirs(LINKS, exist_ok=True)
+    path = os.path.join(LINKS, QUIZ_BG_ID + ".mp4")
+    if not os.path.exists(path):
+        update(0.85, "Making the background (first time only, about 15 seconds)...")
+        tmp = os.path.join(LINKS, "making_background.mp4")
+        subprocess.run([FFMPEG, "-y", "-v", "error", "-f", "lavfi", "-i",
+                        f"gradients=s=360x640:r=30:d={QUIZ_BG_SECONDS}:n=2:c0=0x0F5560:c1=0x2A1450:"
+                        "x0=0:y0=0:x1=360:y1=640:speed=0.008", "-pix_fmt", "yuv420p", "-c:v", "libx264",
+                        "-preset", "veryfast", "-crf", "24", tmp], check=True)
+        os.replace(tmp, path)
+    if not os.path.exists(os.path.join(LINKS, QUIZ_BG_ID + ".json")):
+        save_media_meta(QUIZ_BG_ID, path, "Quiz background")
+    return QUIZ_BG_ID
+
+
+def eleven_key():
+    key = load_config().get("eleven_key")
+    if not key:
+        raise RuntimeError("Add your ElevenLabs API key in Settings first, or pick a free Microsoft voice.")
+    return key
+
+
+@app.get("/api/eleven/voices")
+def api_eleven_voices():
+    key = load_config().get("eleven_key")
+    if not key:
+        return jsonify(voices=[], credits=None)
+    try:
+        return jsonify(voices=eleven.list_voices(key), credits=eleven.credits(key))
+    except RuntimeError as e:
+        return jsonify(error=str(e)), 502
+
+
+@app.post("/api/eleven/preview")
+def api_eleven_preview():
+    """Say a short line so you can hear a voice (costs a few credits; cached after the first time)."""
+    body = request.json or {}
+    voice = (body.get("voice") or "").removeprefix("el:")
+    try:
+        path = eleven.synthesize(eleven_key(), voice, "Can you guess this Roblox game?", os.path.join(WORK, "tts"))
+    except RuntimeError as e:
+        return jsonify(error=str(e)), 502
+    return jsonify(url="/tts/" + os.path.basename(path))
+
+
+def quiz_write(update, body):
+    key = require_key()
+    kind, length = body.get("kind"), body.get("length")
+    if kind not in quiz.TYPES or length not in quiz.LENGTHS:
+        raise RuntimeError("Pick a quiz type and length.")
+    req = quiz.request(kind, length, (body.get("topic") or "").strip()[:300])
+    update(0.2, "Working out the cost (this check is free)...")
+    est = quiz.estimate(key, req)
+    est.update(spending())
+    update(0.3, "Waiting for your approval...")
+    if not update.ask(est):
+        raise RuntimeError("Cancelled. Nothing was charged.")
+    update(0.5, "Claude is writing the questions...")
+    data, usage = quiz.write(key, req)
+    record_usage("quiz", f"Quiz questions: {quiz.TYPES[kind]['header'].title()}", usage)
+    return {"hook": data["hook"], "questions": data["questions"], "cost": usage["cost"],
+            "count": quiz.LENGTHS[length]["count"]}
+
+
+def speak_line(text, voice, rate):
+    """One voice line as a sound in sounds/voice_lines. Returns (sound path, seconds)."""
+    os.makedirs(VOICE_LINES, exist_ok=True)
+    if voice.startswith("el:"):
+        path = eleven.synthesize(eleven_key(), voice[3:], text, VOICE_LINES)
+    else:
+        spoken = tts.synthesize(text, voice, rate, os.path.join(WORK, "tts"))
+        path = os.path.join(VOICE_LINES, "ms_" + os.path.basename(spoken["path"]))
+        if not os.path.exists(path):
+            shutil.copyfile(spoken["path"], path)
+    seconds = float(subprocess.run([FFPROBE, "-v", "error", "-show_entries", "format=duration", "-of", "csv=p=0",
+                                    path], capture_output=True, text=True, check=True).stdout.strip())
+    return os.path.relpath(path, SOUNDS).replace(os.sep, "/"), seconds
+
+
+def quiz_make(update, body):
+    kind = body.get("kind")
+    questions = body.get("questions") or []
+    voice = body.get("voice") or tts.VOICES[0][0]
+    if kind not in quiz.TYPES or not questions:
+        raise RuntimeError("Keep at least one question.")
+    said = quiz.lines(kind, questions, body.get("hook") or "", len(questions))
+    if voice.startswith("el:"):
+        key = eleven_key()
+        new = [text for _, text in said
+               if not os.path.exists(eleven.cached_path(voice[3:], text, VOICE_LINES))]
+        chars = sum(len(text) for text in new)
+        if chars:
+            update(0.05, "Checking your ElevenLabs credits...")
+            info = {"kind": "eleven", "chars": chars, **eleven.credits(key)}
+            update(0.05, "Waiting for your approval...")
+            if not update.ask(info):
+                raise RuntimeError("Cancelled. No ElevenLabs credits were used.")
+    voice_lines = {}
+    for n, (key_, text) in enumerate(said):
+        update(0.1 + 0.7 * n / len(said), f"Recording the voice ({n + 1} of {len(said)})...")
+        voice_lines[key_] = speak_line(text, voice, body.get("rate") or "+0%")
+    bg = quiz_background(update)
+    have = lambda rel: rel if os.path.exists(os.path.join(SOUNDS, rel)) else None
+    sfx = {"tick": have("starter/sfx/click.wav"), "ding": have("starter/sfx/ding.wav"),
+           "whoosh": have("starter/sfx/whoosh.wav"), "pop": have("starter/sfx/pop.wav")}
+    music = body.get("music")
+    music = have(music) if music else None
+    name = (body.get("name") or quiz.TYPES[kind]["title"].title())[:80]
+    p = quiz.build(kind, questions, body.get("hook") or "", voice_lines, sfx, music, bg, QUIZ_BG_SECONDS, name)
+    os.makedirs(PROJECTS, exist_ok=True)
+    with open(project_path(p["id"]), "w") as f:
+        json.dump(p, f)
+    return {"project": p["id"], "seconds": round(editor.duration(p), 1)}
+
+
+@app.post("/api/quiz/write")
+def api_quiz_write():
+    return jsonify(job=start_job(quiz_write, request.json or {}))
+
+
+@app.post("/api/quiz/make")
+def api_quiz_make():
+    return jsonify(job=start_job(quiz_make, request.json or {}))
 
 
 @app.get("/linkpart/<name>")

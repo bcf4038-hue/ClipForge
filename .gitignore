@@ -17,6 +17,9 @@ sounds/my_music/*
 !sounds/my_sfx/.keep
 !sounds/my_music/.keep
 
+# Recorded quiz voices
+sounds/voice_lines/
+
 # Your own fonts
 fonts/*
 !fonts/.keep

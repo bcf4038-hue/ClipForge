@@ -18,6 +18,30 @@ UPDATES
 start.bat checks GitHub for a new version every time you open it and installs it
 automatically. Your settings, API key, sounds, clips and history are never touched.
 
+QUIZ SHORTS (original videos, no gameplay needed)
+-------------------------------------------------
+Home > Quiz Shorts.
+1. Pick a type: guess the game from emojis, true or false, or which is
+   older / more popular. Pick a length: about 30 seconds, or 60-75 seconds
+   (TikTok only pays for videos over 1 minute).
+2. Click "Write questions". Claude writes them (a few cents, you approve first).
+3. CHECK THEM. Ones marked CHECK are ones Claude isn't sure about. Fix wrong
+   answers, untick bad questions.
+4. Pick a voice and music, then "Make video". It opens in the Editor and exports.
+   Change anything there and export again.
+Don't mass-produce: 1-2 good quizzes a day. Lots of near-identical videos is what
+YouTube and TikTok demonetize as "mass-produced".
+
+ELEVENLABS VOICES (paid, optional)
+- Buy at least the Starter plan: the free plan does NOT allow monetized use.
+- elevenlabs.io > your profile (bottom left) > API Keys > Create. Paste it in
+  ClipForge Settings > ElevenLabs API key.
+- Want a voice from their Voice Library (like "Alex")? Open it on elevenlabs.io
+  and click "Add to My Voices". It then appears in ClipForge's Voice list.
+- A 60-75 second quiz uses about 500-1,000 credits. ClipForge shows the exact
+  number and your credits left, and asks before using any. Lines already
+  recorded are reused for free.
+
 EDITOR (edit it exactly how you want)
 -------------------------------------
 Home > Editor.

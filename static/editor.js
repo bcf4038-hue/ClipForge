@@ -414,7 +414,10 @@ function field(label, value, type, onChange, opts = {}) {
     wrap.append(document.createTextNode(label));
     if (type === "select") {
       input = document.createElement("select");
-      input.innerHTML = opts.options.map(([v, t]) => `<option value="${v}">${t}</option>`).join("");
+      // Keep values that aren't in the list (like quiz voice lines) instead of silently showing another.
+      const options = opts.options.some(([v]) => v === value) || value == null ? opts.options
+        : [[value, String(value).split("/").pop().replace(/\.\w+$/, "")], ...opts.options];
+      input.innerHTML = options.map(([v, t]) => `<option value="${v}">${t}</option>`).join("");
       input.value = value;
     } else if (type === "textarea") {
       input = document.createElement("textarea");
@@ -814,3 +817,11 @@ window.edOnShow = async () => {
   }
 };
 window.edOnHide = () => stop();
+// Open a project made somewhere else (like the quiz maker) and optionally export it right away.
+window.edOpenProject = async (id, render) => {
+  ed.ready = true;
+  await edLoadList(id);
+  await edOpen(id);
+  showView("edit");
+  if (render) $("#edRender").click();
+};

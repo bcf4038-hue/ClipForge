@@ -21,7 +21,8 @@ VERSION_FILE = os.path.join(ROOT, ".version")
 # Never overwritten: your data, and the .bat files (Windows reads a running .bat
 # line by line, so replacing it mid-run breaks it).
 KEEP = {"config.json", "cookies.txt", "usage.json", "styles.json", "profile.json", ".version", "install.bat", "start.bat"}
-KEEP_DIRS = ("work", "output", ".venv", "fonts", "projects", os.path.join("sounds", "my_sfx"), os.path.join("sounds", "my_music"))
+KEEP_DIRS = ("work", "output", ".venv", "fonts", "projects", os.path.join("sounds", "my_sfx"), os.path.join("sounds", "my_music"),
+             os.path.join("sounds", "voice_lines"))
 
 
 def fetch(url, timeout=20):
