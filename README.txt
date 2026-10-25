@@ -27,7 +27,10 @@ Home > Quiz Shorts.
 2. Click "Write questions". Claude writes them (a few cents, you approve first).
 3. CHECK THEM. Ones marked CHECK are ones Claude isn't sure about. Fix wrong
    answers, untick bad questions.
-4. Pick a voice and music, then "Make video". It opens in the Editor and exports.
+4. Pick a voice and music, then "Make video".
+   Best for monetization: Voice > "My own voice". Press Space to record each
+   line, Space again to stop. Silence is trimmed and volume evened out for you.
+   A cheap USB or headset mic is plenty; record in a quiet room. It opens in the Editor and exports.
    Change anything there and export again.
 Don't mass-produce: 1-2 good quizzes a day. Lots of near-identical videos is what
 YouTube and TikTok demonetize as "mass-produced".

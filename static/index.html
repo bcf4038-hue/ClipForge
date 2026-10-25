@@ -162,6 +162,14 @@
         <select id="qzMusic"></select>
       </label>
     </div>
+    <div id="qzRec" class="qz-rec hidden">
+      <p class="muted small">Read each line with energy, like you're hosting a game show. Click a line's <b>Record</b>, or press <b>Space</b> to record the next one and Space again to stop. Silence at the start and end is cut automatically. The first time, your browser asks to use your microphone: click Allow.</p>
+      <div class="row">
+        <button id="qzRecNext">Record next line (Space)</button>
+        <span id="qzRecStatus" class="muted small"></span>
+      </div>
+      <div id="qzRecList"></div>
+    </div>
     <div class="row">
       <button id="qzHear" class="ghost">Hear voice</button>
       <span id="qzCredits" class="muted small"></span>

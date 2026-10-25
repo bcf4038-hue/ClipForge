@@ -1,6 +1,6 @@
 // Quiz Shorts: Claude writes questions, you check them, ClipForge builds an Editor project and exports it.
 // Uses helpers from app.js ($, api, waitJob, setProgress, errText, money, state, loadSounds).
-const qz = { kind: null, questions: [], count: 8, voices: null, credits: null };
+const qz = { kind: null, questions: [], count: 8, voices: null, credits: null, lines: [], recs: {}, rec: null };
 const QZ_SECONDS = { intro: 2.6, question: 7.8, outro: 2.8 };  // rough, for the length estimate
 const esc = (v) => String(v ?? "").replace(/&/g, "&amp;").replace(/"/g, "&quot;").replace(/</g, "&lt;");
 
@@ -43,6 +43,7 @@ function qzFillVoices() {
     if (mine.length) html += `<optgroup label="ElevenLabs: My Voices">${mine.map((v) => opt(v, v.name + (v.detail ? ` (${v.detail})` : ""))).join("")}</optgroup>`;
     if (theirs.length) html += `<optgroup label="ElevenLabs: built-in">${theirs.map((v) => opt(v, v.name + (v.detail ? ` (${v.detail})` : ""))).join("")}</optgroup>`;
   }
+  html = `<optgroup label="Your voice"><option value="mine">🎙 My own voice (record it)</option></optgroup>` + html;
   html += `<optgroup label="Free Microsoft voices">${qz.voices.ms.map((v) => opt(v, v.name)).join("")}</optgroup>`;
   sel.innerHTML = html;
   if (keep && [...sel.options].some((o) => o.value === keep)) sel.value = keep;
@@ -55,6 +56,8 @@ function qzShowCredits() {
   if (el && c) {
     msg = `ElevenLabs: ${c.left.toLocaleString()} of ${c.limit.toLocaleString()} credits left. This quiz needs about ${qzChars().toLocaleString()}.`;
     if (c.tier === "free") msg += " Free plan: not allowed in monetized videos.";
+  } else if ($("#qzVoice").value === "mine") {
+    msg = "Free, and the safest choice for monetization.";
   } else if (!el) {
     msg = state.hasEleven ? "Free voice." : "Free voice. Add an ElevenLabs key in Settings for their voices.";
   }
@@ -103,12 +106,14 @@ function qzRow(q, i) {
       const k = input.dataset.k;
       q[k] = qz.kind === "truefalse" && k === "answer" ? input.value === "true" : input.value;
       qzShowCredits();
+      qzRecLater();
     });
   });
   row.querySelector("input[type=checkbox]").onchange = (e) => {
     q.use = e.target.checked;
     row.classList.toggle("off", !q.use);
     qzUpdateLength();
+    qzRecLater();
   };
   return row;
 }
@@ -132,6 +137,8 @@ $("#qzWrite").onclick = async () => {
     $("#qzReview").classList.remove("hidden");
     qzRenderList();
     await qzLoadVoices();
+    qz.recs = {};
+    qzRecShow();
     $("#qzReview").scrollIntoView({ behavior: "smooth" });
   } catch (e) {
     setProgress(prog, 0, errText(e.message));
@@ -139,12 +146,13 @@ $("#qzWrite").onclick = async () => {
     $("#qzWrite").disabled = false;
   }
 };
-$("#qzHook").oninput = qzShowCredits;
-$("#qzVoice").onchange = () => { qzShowCredits(); qzRemember(); };
+$("#qzHook").oninput = () => { qzShowCredits(); qzRecLater(); };
+$("#qzVoice").onchange = () => { qzShowCredits(); qzRemember(); qzRecShow(); };
 $("#qzMusic").onchange = qzRemember;
 
 $("#qzHear").onclick = async () => {
   const voice = $("#qzVoice").value;
+  if (voice === "mine") { $("#qzCredits").textContent = "Record a line below, then click its Play button."; return; }
   $("#qzHear").disabled = true;
   try {
     const r = voice.startsWith("el:")
@@ -158,15 +166,107 @@ $("#qzHear").onclick = async () => {
   }
 };
 
+// ---------- recording your own voice ----------
+const qzRecOk = (l) => qz.recs[l.key] && qz.recs[l.key].text === l.text;
+let qzRecTimer = null;
+function qzRecLater() {
+  if ($("#qzVoice").value !== "mine") return;
+  clearTimeout(qzRecTimer);
+  qzRecTimer = setTimeout(qzRecShow, 600);
+}
+async function qzRecLoad() {
+  const questions = qzUsed().map(({ use, ...q }) => q);
+  if (!questions.length) { qz.lines = []; return; }
+  qz.lines = (await api("/api/quiz/lines", { kind: qz.kind, questions, hook: $("#qzHook").value })).lines;
+}
+async function qzRecShow() {
+  const on = $("#qzVoice").value === "mine" && qz.questions.length > 0;
+  $("#qzRec").classList.toggle("hidden", !on);
+  if (!on || qz.rec) return;
+  try { await qzRecLoad(); } catch (e) { $("#qzRecStatus").textContent = errText(e.message); return; }
+  qzRecRender();
+}
+function qzRecNext() { return qz.lines.find((l) => !qzRecOk(l)); }
+function qzRecRender() {
+  const next = qzRecNext();
+  const done = qz.lines.filter(qzRecOk).length;
+  $("#qzRecStatus").textContent = qz.rec ? "Recording... press Space or Stop when you're done."
+    : `${done} of ${qz.lines.length} lines recorded${done === qz.lines.length ? ". All done: click Make video." : "."}`;
+  $("#qzRecNext").textContent = qz.rec ? "Stop (Space)" : "Record next line (Space)";
+  $("#qzRecNext").disabled = !qz.rec && !next;
+  $("#qzRecList").replaceChildren(...qz.lines.map((l, i) => {
+    const row = document.createElement("div");
+    const live = qz.rec && qz.rec.key === l.key;
+    row.className = "qz-line" + (live ? " live" : !qz.rec && next && next.key === l.key ? " next" : "");
+    const ok = qzRecOk(l);
+    row.innerHTML = `<span class="${ok ? "ok" : "todo"}">${ok ? "✓" : i + 1}</span><span>${esc(l.text)}</span>
+      <button class="ghost play" ${ok ? "" : "disabled"}>Play</button>
+      <button class="rec ${ok ? "ghost" : ""}">${live ? "Stop" : ok ? "Redo" : "Record"}</button>`;
+    row.querySelector(".play").onclick = () => new Audio(qz.recs[l.key].url).play();
+    row.querySelector(".rec").onclick = () => (live ? qzRecStop() : qzRecStart(l));
+    row.querySelector(".rec").disabled = !!qz.rec && !live;
+    return row;
+  }));
+}
+async function qzRecStart(line) {
+  if (qz.rec) return;
+  let stream;
+  try {
+    stream = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: false, noiseSuppression: true, autoGainControl: false } });
+  } catch (e) {
+    $("#qzRecStatus").textContent = "ClipForge can't use your microphone. Click the mic icon in the address bar, choose Allow, and try again.";
+    return;
+  }
+  const chunks = [];
+  const recorder = new MediaRecorder(stream);
+  recorder.ondataavailable = (e) => { if (e.data.size) chunks.push(e.data); };
+  recorder.onstop = async () => {
+    stream.getTracks().forEach((t) => t.stop());
+    qz.rec = null;
+    $("#qzRecStatus").textContent = "Saving...";
+    const form = new FormData();
+    form.append("audio", new Blob(chunks, { type: recorder.mimeType }), "line.webm");
+    try {
+      const res = await fetch("/api/quiz/record", { method: "POST", body: form });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.error || `Request failed (${res.status})`);
+      qz.recs[line.key] = { text: line.text, ...data };
+    } catch (e) {
+      qzRecRender();
+      $("#qzRecStatus").textContent = errText(e.message);
+      return;
+    }
+    qzRecRender();
+  };
+  qz.rec = { key: line.key, recorder };
+  recorder.start();
+  qzRecRender();
+}
+function qzRecStop() { if (qz.rec) qz.rec.recorder.stop(); }
+$("#qzRecNext").onclick = () => { if (qz.rec) qzRecStop(); else if (qzRecNext()) qzRecStart(qzRecNext()); };
+document.addEventListener("keydown", (e) => {
+  if (e.key !== " " || $("#view-quiz").classList.contains("hidden") || $("#qzRec").classList.contains("hidden")) return;
+  if (e.target.closest("input, textarea, select")) return;
+  e.preventDefault();
+  if (!e.repeat) $("#qzRecNext").click();
+});
+
 $("#qzMake").onclick = async () => {
   const prog = $("#qzMakeProgress");
   const questions = qzUsed().map(({ use, ...q }) => q);
   const blank = questions.some((q) => Object.entries(q).some(([k, v]) => k !== "sure" && typeof v === "string" && !v.trim()));
   if (blank) { setProgress(prog, 0, "Fill in every box of the ticked questions first."); return; }
+  const mine = $("#qzVoice").value === "mine";
+  if (mine) {
+    await qzRecLoad();
+    const left = qz.lines.filter((l) => !qzRecOk(l)).length;
+    if (left) { setProgress(prog, 0, `Record your voice first: ${left} line${left > 1 ? "s" : ""} left.`); $("#qzRec").scrollIntoView({ behavior: "smooth" }); return; }
+  }
   $("#qzMake").disabled = true;
   qzRemember();
   try {
-    const { job } = await api("/api/quiz/make", { kind: qz.kind, questions, hook: $("#qzHook").value,
+    const recorded = mine ? Object.fromEntries(qz.lines.map((l) => [l.key, qz.recs[l.key].name])) : undefined;
+    const { job } = await api("/api/quiz/make", { kind: qz.kind, questions, hook: $("#qzHook").value, recorded,
       voice: $("#qzVoice").value, music: $("#qzMusic").value, name: $("#qzTopic").value.trim() ? `Quiz: ${$("#qzTopic").value.trim()}` : "" });
     const r = await waitJob(job, prog, "Recording the voice");
     setProgress(prog, 1, `Built a ${Math.round(r.seconds)} second quiz. Opening it in the Editor and exporting...`);

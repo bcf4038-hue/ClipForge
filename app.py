@@ -856,9 +856,56 @@ def speak_line(text, voice, rate):
         path = os.path.join(VOICE_LINES, "ms_" + os.path.basename(spoken["path"]))
         if not os.path.exists(path):
             shutil.copyfile(spoken["path"], path)
-    seconds = float(subprocess.run([FFPROBE, "-v", "error", "-show_entries", "format=duration", "-of", "csv=p=0",
-                                    path], capture_output=True, text=True, check=True).stdout.strip())
-    return os.path.relpath(path, SOUNDS).replace(os.sep, "/"), seconds
+    return os.path.relpath(path, SOUNDS).replace(os.sep, "/"), audio_seconds(path)
+
+
+def audio_seconds(path):
+    return float(subprocess.run([FFPROBE, "-v", "error", "-show_entries", "format=duration", "-of", "csv=p=0",
+                                 path], capture_output=True, text=True, check=True).stdout.strip())
+
+
+def recording_path(name):
+    """A recording made with "My own voice", or None."""
+    if not re.fullmatch(r"rec_[0-9a-f]{12}\.wav", name or ""):
+        return None
+    path = os.path.join(VOICE_LINES, name)
+    return path if os.path.exists(path) else None
+
+
+@app.post("/api/quiz/lines")
+def api_quiz_lines():
+    """Exactly what the voice says, line by line, so you can record it yourself."""
+    body = request.json or {}
+    if body.get("kind") not in quiz.TYPES or not body.get("questions"):
+        abort(400)
+    said = quiz.lines(body["kind"], body["questions"], body.get("hook") or "", len(body["questions"]))
+    return jsonify(lines=[{"key": k, "text": t} for k, t in said])
+
+
+@app.post("/api/quiz/record")
+def api_quiz_record():
+    """Save one recorded line: trims the silence at both ends and evens out the volume."""
+    f = request.files.get("audio")
+    if not f:
+        abort(400)
+    os.makedirs(VOICE_LINES, exist_ok=True)
+    raw = os.path.join(VOICE_LINES, "incoming_" + uuid.uuid4().hex[:8])
+    f.save(raw)
+    name = f"rec_{uuid.uuid4().hex[:12]}.wav"
+    trim = "silenceremove=start_periods=1:start_threshold=-45dB:start_silence=0.08"
+    try:
+        subprocess.run([FFMPEG, "-y", "-v", "error", "-i", raw, "-af",
+                        f"highpass=f=80,{trim},areverse,{trim},areverse,loudnorm=I=-16:TP=-1.5:LRA=11",
+                        "-ar", "48000", "-ac", "2", os.path.join(VOICE_LINES, name)], check=True)
+    except subprocess.CalledProcessError:
+        return jsonify(error="Couldn't read that recording. Try again."), 400
+    finally:
+        os.remove(raw)
+    seconds = audio_seconds(os.path.join(VOICE_LINES, name))
+    if seconds < 0.2:
+        os.remove(os.path.join(VOICE_LINES, name))
+        return jsonify(error="That recording was silent. Check your mic is picked and not muted, then try again."), 400
+    return jsonify(name=name, seconds=round(seconds, 2), url=f"/sounds/voice_lines/{name}")
 
 
 def quiz_make(update, body):
@@ -880,7 +927,18 @@ def quiz_make(update, body):
             if not update.ask(info):
                 raise RuntimeError("Cancelled. No ElevenLabs credits were used.")
     voice_lines = {}
+    if voice == "mine":
+        # Your own recordings, made line by line in the browser.
+        recorded = body.get("recorded") or {}
+        missing = [n + 1 for n, (key_, _) in enumerate(said) if not recording_path(recorded.get(key_))]
+        if missing:
+            raise RuntimeError(f"Record every line first (missing: line {', '.join(map(str, missing))}).")
+        for key_, _ in said:
+            path = recording_path(recorded[key_])
+            voice_lines[key_] = (os.path.relpath(path, SOUNDS).replace(os.sep, "/"), audio_seconds(path))
     for n, (key_, text) in enumerate(said):
+        if key_ in voice_lines:
+            continue
         update(0.1 + 0.7 * n / len(said), f"Recording the voice ({n + 1} of {len(said)})...")
         voice_lines[key_] = speak_line(text, voice, body.get("rate") or "+0%")
     bg = quiz_background(update)

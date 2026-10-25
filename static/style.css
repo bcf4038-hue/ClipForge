@@ -190,3 +190,11 @@ a { color: var(--teal); }
 .qz-fields select { width: auto; }
 .qz-num { font-weight: 800; color: var(--orange); min-width: 26px; }
 .qz-unsure { font-size: 11px; font-weight: 800; letter-spacing: .04em; padding: 2px 8px; border-radius: 999px; background: rgba(255, 122, 26, .15); color: var(--orange); border: 1px solid rgba(255, 122, 26, .5); }
+.qz-rec { margin: 8px 0; padding: 12px; border: 1px solid var(--line); border-radius: 12px; background: var(--panel-2); }
+.qz-line { display: grid; grid-template-columns: 22px 1fr auto auto; gap: 10px; align-items: center; padding: 8px 6px; border-radius: 8px; }
+.qz-line.next { background: rgba(25, 195, 181, .1); }
+.qz-line.live { background: rgba(239, 68, 68, .15); }
+.qz-line .ok { color: var(--teal); font-weight: 800; }
+.qz-line .todo { color: var(--muted); }
+.qz-line button { padding: 6px 12px; }
+.qz-line.live button.rec { background: #EF4444; color: #fff; }
