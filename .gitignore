@@ -28,3 +28,5 @@ fonts/*
 .venv/
 __pycache__/
 *.pyc
+# Local secrets written by `elevenlabs onboard`
+/.env
