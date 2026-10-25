@@ -32,6 +32,11 @@ Home > Quiz Shorts.
    line, Space again to stop. Silence is trimmed and volume evened out for you.
    A cheap USB or headset mic is plenty; record in a quiet room. It opens in the Editor and exports.
    Change anything there and export again.
+Every quiz opens with a challenge hook (boom, zoom, flash), has a progress
+bar, EASY > IMPOSSIBLE difficulty tags, a draining timer, and a zoom + flash
+on each answer. Theme: "Auto" picks colors from your topic (horror topic =
+Horror theme), or choose one. All themes keep the RoRush look.
+Editor: Text tab > "Zoom punch" / "Color flash" adds those effects anywhere.
 Don't mass-produce: 1-2 good quizzes a day. Lots of near-identical videos is what
 YouTube and TikTok demonetize as "mass-produced".
 

@@ -10,7 +10,7 @@ function qzSettings() {
 function qzRemember() {
   try {
     localStorage.setItem("clipforge:quiz", JSON.stringify({ kind: $("#qzKind").value, length: $("#qzLength").value,
-      voice: $("#qzVoice").value, music: $("#qzMusic").value }));
+      voice: $("#qzVoice").value, music: $("#qzMusic").value, theme: $("#qzTheme").value }));
   } catch (e) { /* storage unavailable */ }
 }
 
@@ -267,9 +267,9 @@ $("#qzMake").onclick = async () => {
   try {
     const recorded = mine ? Object.fromEntries(qz.lines.map((l) => [l.key, qz.recs[l.key].name])) : undefined;
     const { job } = await api("/api/quiz/make", { kind: qz.kind, questions, hook: $("#qzHook").value, recorded,
-      voice: $("#qzVoice").value, music: $("#qzMusic").value, name: $("#qzTopic").value.trim() ? `Quiz: ${$("#qzTopic").value.trim()}` : "" });
+      voice: $("#qzVoice").value, music: $("#qzMusic").value, theme: $("#qzTheme").value, topic: $("#qzTopic").value, name: $("#qzTopic").value.trim() ? `Quiz: ${$("#qzTopic").value.trim()}` : "" });
     const r = await waitJob(job, prog, "Recording the voice");
-    setProgress(prog, 1, `Built a ${Math.round(r.seconds)} second quiz. Opening it in the Editor and exporting...`);
+    setProgress(prog, 1, `Built a ${Math.round(r.seconds)} second quiz (${r.theme} theme). Opening it in the Editor and exporting...`);
     if (qz.credits) qzLoadVoices(true);  // refresh credits left
     await window.edOpenProject(r.project, true);
   } catch (e) {
@@ -287,5 +287,7 @@ window.qzOnShow = async () => {
   $("#qzMusic").innerHTML = `<option value="">No music</option>` + music.map((m) => `<option value="${esc(m.id)}">${esc(m.name)}</option>`).join("");
   const pick = saved.music !== undefined ? saved.music : (music.find((m) => /upbeat/i.test(m.name)) || {}).id;
   if (pick !== undefined && [...$("#qzMusic").options].some((o) => o.value === pick)) $("#qzMusic").value = pick;
+  if (saved.theme !== undefined) $("#qzTheme").value = saved.theme;
+  $("#qzTheme").onchange = qzRemember;
   if (qz.questions.length) qzLoadVoices();
 };

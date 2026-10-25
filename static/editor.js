@@ -14,6 +14,7 @@ const ed = {
   ready: false,
 };
 const LABEL_W = 70;
+const FX_LEN = 0.3;  // seconds a zoom punch takes to settle
 const uid = () => Math.random().toString(16).slice(2, 10);
 const clipLen = (c) => Math.max(0, c.out - c.in);
 const total = () => ed.p.clips.reduce((sum, c) => sum + clipLen(c), 0);
@@ -275,10 +276,18 @@ function renderTimeline() {
   $("#edLaneTexts").innerHTML = "";
   $("#edLaneTexts").style.height = `${tl.count * 28 + 8}px`;
   tl.placed.forEach(({ it, row }) => {
-    const b = block("text", it.id, it.start, it.end - it.start, it.text || "(empty)");
+    const b = block("text", it.id, it.start, it.end - it.start,
+      it.shape ? (it.anim === "drain" ? "Timer bar" : "Bar") : it.text || "(empty)");
     b.style.top = `${4 + row * 28}px`;
     addHandles(b, it, "text");
     $("#edLaneTexts").appendChild(b);
+  });
+  // Effects
+  $("#edLaneEffects").innerHTML = "";
+  (ed.p.effects || []).forEach((fx) => {
+    const b = block("effect", fx.id, fx.start, FX_LEN, fx.type === "punch" ? "Zoom" : "Flash");
+    b.style.top = "4px";
+    $("#edLaneEffects").appendChild(b);
   });
   // Sounds
   const sl = laneRows(ed.p.sounds, (s) => s.start + soundLength(s.sound));
@@ -373,7 +382,7 @@ $("#edTl").addEventListener("pointerdown", (e) => {
       if (side === "l") item.start = Math.min(Math.max(0, orig.start + dt), item.end - 0.2);
       else if (side === "r") item.end = Math.max(orig.end + dt, item.start + 0.2);
       else { const len = orig.end - orig.start; item.start = Math.max(0, orig.start + dt); item.end = item.start + len; }
-    } else if (type === "sound") {
+    } else if (type === "sound" || type === "effect") {
       item.start = Math.max(0, orig.start + dt);
     }
     ["in", "out", "start", "end"].forEach((k) => { if (k in item) item[k] = Math.round(item[k] * 100) / 100; });
@@ -399,6 +408,19 @@ $("#edTl").addEventListener("pointerdown", (e) => {
   window.addEventListener("pointerup", onUp);
 });
 $("#edZoom").oninput = () => { ed.pps = Number($("#edZoom").value); renderTimeline(); };
+
+document.querySelectorAll(".ed-fx").forEach((b) => {
+  b.onclick = () => {
+    if (!ed.p.clips.length) return;
+    snapshot();
+    ed.p.effects = ed.p.effects || [];
+    const fx = { id: uid(), type: b.dataset.fx, start: Math.round(ed.time * 100) / 100 };
+    if (fx.type === "flash") fx.color = "#FFFFFF";
+    ed.p.effects.push(fx);
+    ed.sel = { type: "effect", id: fx.id };
+    refresh();
+  };
+});
 
 // ---------- inspector ----------
 function field(label, value, type, onChange, opts = {}) {
@@ -490,7 +512,7 @@ function renderInspector() {
       field("Box behind", item.box, "bool", (v) => { item.box = v; }),
       field("Box color", item.box_color, "color", (v) => { item.box_color = v; }),
       field("Box opacity", item.box_opacity, "pct", (v) => { item.box_opacity = v; }),
-      field("Animation", item.anim, "select", (v) => { item.anim = v; }, { options: [["pop", "Pop in"], ["fade", "Fade"], ["none", "None"]] }),
+      field("Animation", item.anim, "select", (v) => { item.anim = v; }, { options: [["pop", "Pop in"], ["fade", "Fade"], ["drain", "Shrink away (timer bar)"], ["none", "None"]] }),
       field("ALL CAPS", item.uppercase, "bool", (v) => { item.uppercase = v; }),
       field("Shows from", fmt(item.start), "time", (v) => { item.start = Math.min(Math.max(0, v), item.end - 0.2); }),
       field("Until", fmt(item.end), "time", (v) => { item.end = Math.max(v, item.start + 0.2); }));
@@ -502,6 +524,12 @@ function renderInspector() {
       field("Starts at", fmt(item.start), "time", (v) => { item.start = Math.max(0, v); }),
       field("Volume", item.volume, "pct", (v) => { item.volume = v; }, { max: 150 }));
     btn("Play", () => playSound(item.sound));
+    btn("Move to playhead", () => { snapshot(); item.start = Math.round(ed.time * 100) / 100; refresh(); });
+  } else if (ed.sel.type === "effect") {
+    $("#edInspTitle").textContent = "Effect";
+    add(field("Effect", item.type, "select", (v) => { item.type = v; }, { options: [["punch", "Zoom punch"], ["flash", "Color flash"]] }),
+      field("At", fmt(item.start), "time", (v) => { item.start = Math.max(0, v); }));
+    if (item.type === "flash") add(field("Flash color", item.color || "#FFFFFF", "color", (v) => { item.color = v; }));
     btn("Move to playhead", () => { snapshot(); item.start = Math.round(ed.time * 100) / 100; refresh(); });
   } else if (ed.sel.type === "music") {
     $("#edInspTitle").textContent = "Music";
@@ -576,7 +604,7 @@ const voiceEl = new Audio();
 const textCache = new Map();  // look of a text -> {url, w, h}
 function textImage(t) {
   const key = JSON.stringify(["text", "font", "size", "color", "outline", "outline_color", "box", "box_color",
-    "box_opacity", "uppercase"].map((k) => t[k]));
+    "box_opacity", "uppercase", "shape", "bar_w", "bar_h"].map((k) => t[k]));
   if (!textCache.has(key)) {
     if (textCache.size > 300) textCache.clear();
     textCache.set(key, rasterText(t));
@@ -589,7 +617,7 @@ function renderStage() {
   const scale = stage.clientWidth / 1080;
   const box = $("#edTexts");
   box.innerHTML = "";
-  ed.p.texts.filter((t) => ed.time >= t.start && ed.time < t.end && String(t.text || "").trim()).forEach((t) => {
+  ed.p.texts.filter((t) => ed.time >= t.start && ed.time < t.end && (t.shape || String(t.text || "").trim())).forEach((t) => {
     const img = textImage(t);
     const el = document.createElement("img");
     el.className = `ed-text${ed.sel && ed.sel.type === "text" && ed.sel.id === t.id ? " sel" : ""}`;
@@ -600,9 +628,22 @@ function renderStage() {
     el.style.top = `${t.y * 100}%`;
     el.style.width = `${img.w * scale}px`;
     el.style.height = `${img.h * scale}px`;
+    const since = ed.time - t.start;
+    if (t.anim === "drain") el.style.transform = `translate(-50%, -50%) scaleX(${Math.max(0.001, 1 - since / Math.max(t.end - t.start, 0.01))})`;
+    else if (t.anim === "pop" && since < 0.18) el.style.transform = `translate(-50%, -50%) scale(${0.35 + 0.65 * since / 0.18})`;
     el.dataset.id = t.id;
     box.appendChild(el);
   });
+  // Effects: the same timing curves as the export.
+  let zoom = 0, flash = 0, color = "#FFFFFF";
+  (ed.p.effects || []).forEach((fx) => {
+    const d = ed.time - fx.start;
+    if (fx.type === "punch" && d >= 0 && d < FX_LEN) zoom += 0.08 * (1 - d / FX_LEN);
+    if (fx.type === "flash" && d >= -0.03 && d < 0.12) { flash = 0.45; color = fx.color || "#FFFFFF"; }
+  });
+  box.style.transform = $("#edVideo").style.transform = zoom ? `scale(${1 + zoom})` : "";
+  $("#edFlash").style.opacity = flash;
+  $("#edFlash").style.background = color;
 }
 // Drag text on the preview to place it.
 $("#edTexts").addEventListener("pointerdown", (e) => {
@@ -733,6 +774,23 @@ function hexAlpha(hex, opacity) {
   return `rgba(${parseInt(h.slice(0, 2), 16)}, ${parseInt(h.slice(2, 4), 16)}, ${parseInt(h.slice(4, 6), 16)}, ${opacity})`;
 }
 function rasterText(t) {
+  if (t.shape === "bar") {
+    // A solid rounded bar (progress and timer bars).
+    const canvas = document.createElement("canvas");
+    canvas.width = Math.max(4, Math.round(t.bar_w || 600));
+    canvas.height = Math.max(4, Math.round(t.bar_h || 24));
+    const g = canvas.getContext("2d");
+    const r = canvas.height / 2;
+    g.fillStyle = t.color;
+    g.beginPath();
+    g.moveTo(r, 0);
+    g.arcTo(canvas.width, 0, canvas.width, canvas.height, r);
+    g.arcTo(canvas.width, canvas.height, 0, canvas.height, r);
+    g.arcTo(0, canvas.height, 0, 0, r);
+    g.arcTo(0, 0, canvas.width, 0, r);
+    g.fill();
+    return { url: canvas.toDataURL("image/png"), w: canvas.width, h: canvas.height };
+  }
   const text = t.uppercase ? t.text.toUpperCase() : t.text;
   const lines = text.split("\n");
   const font = `${t.size}px "${t.font}", "Arial Black", sans-serif`;
@@ -768,7 +826,7 @@ function rasterText(t) {
 async function rasterTexts() {
   const out = {};
   for (const t of ed.p.texts) {
-    if (!String(t.text || "").trim()) continue;
+    if (!t.shape && !String(t.text || "").trim()) continue;
     try { await document.fonts.load(`${t.size}px "${t.font}"`); } catch (e) { /* use the fallback font */ }
     out[t.id] = rasterText(t).url;
   }

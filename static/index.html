@@ -161,6 +161,19 @@
       <label>Music
         <select id="qzMusic"></select>
       </label>
+      <label>Theme
+        <select id="qzTheme">
+          <option value="">Auto (matches the topic)</option>
+          <option value="rorush">RoRush (orange + teal)</option>
+          <option value="neon">Neon</option>
+          <option value="horror">Horror</option>
+          <option value="candy">Candy</option>
+          <option value="gold">Gold</option>
+          <option value="ice">Ice</option>
+          <option value="toxic">Toxic</option>
+          <option value="sunset">Sunset</option>
+        </select>
+      </label>
     </div>
     <div id="qzRec" class="qz-rec hidden">
       <p class="muted small">Read each line with energy, like you're hosting a game show. Click a line's <b>Record</b>, or press <b>Space</b> to record the next one and Space again to stop. Silence at the start and end is cut automatically. The first time, your browser asks to use your microphone: click Allow.</p>
@@ -271,6 +284,9 @@
         <button class="ed-preset" data-preset="number">Big number (#1)</button>
         <button class="ed-preset" data-preset="label">Label under the number</button>
         <button class="ed-preset" data-preset="caption">Plain text</button>
+        <p class="muted small">Effects at the playhead:</p>
+        <button class="ed-fx" data-fx="punch">Zoom punch</button>
+        <button class="ed-fx" data-fx="flash">Color flash</button>
       </div>
     </aside>
 
@@ -278,6 +294,7 @@
       <div id="edStage" class="ed-stage">
         <video id="edVideo" playsinline preload="auto"></video>
         <div id="edTexts"></div>
+        <div id="edFlash" class="ed-flash"></div>
         <div id="edEmpty" class="ed-empty">Add clips from the left to start</div>
       </div>
       <div class="row ed-transport">
@@ -304,6 +321,7 @@
         <div class="ed-row ed-ruler-row"><span class="ed-tname"></span><div id="edRuler" class="ed-lane ed-ruler"></div></div>
         <div class="ed-row"><span class="ed-tname">Video</span><div id="edLaneClips" class="ed-lane" data-lane="clips"></div></div>
         <div class="ed-row"><span class="ed-tname">Text</span><div id="edLaneTexts" class="ed-lane" data-lane="texts"></div></div>
+        <div class="ed-row"><span class="ed-tname">Effects</span><div id="edLaneEffects" class="ed-lane" data-lane="effects"></div></div>
         <div class="ed-row"><span class="ed-tname">Sounds</span><div id="edLaneSounds" class="ed-lane" data-lane="sounds"></div></div>
         <div class="ed-row"><span class="ed-tname">Music</span><div id="edLaneMusic" class="ed-lane" data-lane="music"></div></div>
         <div id="edPlayhead" class="ed-playhead"></div>

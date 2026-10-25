@@ -6,6 +6,8 @@ A project is plain JSON:
     texts:  text overlays                  {id, text, start, end, font, size, color, outline,
                                             outline_color, box, box_color, box_opacity, x, y, anim, uppercase}
     sounds: sound effects                  {id, sound, start, volume}
+    effects: picture effects               {id, type: "punch" | "flash", start, color}
+            Texts can also be solid bars: shape "bar" with bar_w / bar_h in pixels.
     music:  background track or None       {sound, volume}
 """
 import json
@@ -166,6 +168,10 @@ def render_project(p, media_path, sound_path, out_path, workdir, ffmpeg="ffmpeg"
             # Grows from 35% to full size in 0.18 s, like the preview.
             grow = f"min(1\\,0.35+0.65*max(0\\,t-{start:.3f})/0.18)"
             prep = f"format=rgba,scale=w='max(2\\,trunc(iw*{grow}/2)*2)':h=-2:eval=frame"
+        elif anim == "drain":
+            # Shrinks to nothing by its end time (timer bars); stays centered like the preview.
+            left = f"max(0.001\\,1-(t-{start:.3f})/{max(end - start, 0.01):.3f})"
+            prep = f"format=rgba,scale=w='max(2\\,trunc(iw*{left}/2)*2)':h=ih:eval=frame"
         elif anim == "fade":
             prep = (f"format=rgba,fade=t=in:st={start:.3f}:d=0.2:alpha=1,"
                     f"fade=t=out:st={max(start, end - 0.2):.3f}:d=0.2:alpha=1")
@@ -176,6 +182,18 @@ def render_project(p, media_path, sound_path, out_path, workdir, ffmpeg="ffmpeg"
         filters.append(f"{current}[img{k}]overlay=x='{x:.1f}-w/2':y='{y:.1f}-h/2':eval=frame:eof_action=pass:"
                        f"enable='between(t\\,{start:.3f}\\,{end:.3f})'[vo{k}]")
         current = f"[vo{k}]"
+    # Effects on the finished picture: zoom punches ease back over 0.3 s, flashes last ~0.15 s.
+    effects = [fx for fx in p.get("effects", []) if 0 <= float(fx["start"]) < total]
+    punches = [float(fx["start"]) for fx in effects if fx.get("type") == "punch"]
+    if punches:
+        z = "+".join(f"max(0\\,1-(t-{c:.3f})/0.3)*gte(t\\,{c:.3f})" for c in punches)
+        filters.append(f"{current}scale=w='trunc({W}*(1+0.08*({z}))/2)*2':h=-2:eval=frame,crop={W}:{H}[vz]")
+        current = "[vz]"
+    for k, fx in enumerate(fx for fx in effects if fx.get("type") == "flash"):
+        c = float(fx["start"])
+        color = "0x" + str(fx.get("color") or "#FFFFFF").lstrip("#")[:6]
+        filters.append(f"{current}drawbox=color={color}@0.45:t=fill:enable='between(t\\,{max(c - 0.03, 0):.3f}\\,{c + 0.12:.3f})'[vf{k}]")
+        current = f"[vf{k}]"
     filters.append(f"{current}format=yuv420p[v]")
 
     mix = ["[acat]"]

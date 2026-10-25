@@ -776,25 +776,28 @@ def api_editor_render():
 # ---------- quiz shorts ----------
 
 VOICE_LINES = os.path.join(SOUNDS, "voice_lines")
-QUIZ_BG_ID = "0b9c1200a002"  # the built-in animated background, made once
 QUIZ_BG_SECONDS = 120
 
 
-def quiz_background(update=lambda *a: None):
-    """A slowly turning teal-to-purple gradient, as an Editor clip. Made small; the Editor scales it up."""
+def quiz_background(theme, update=lambda *a: None):
+    """A slowly turning two-color gradient for the theme, as an Editor clip. Made once per theme, small;
+    the Editor scales it up."""
+    names = list(quiz.THEMES)
+    bg_id = f"0b9c1200b{names.index(theme):03x}"
     os.makedirs(LINKS, exist_ok=True)
-    path = os.path.join(LINKS, QUIZ_BG_ID + ".mp4")
+    path = os.path.join(LINKS, bg_id + ".mp4")
     if not os.path.exists(path):
-        update(0.85, "Making the background (first time only, about 15 seconds)...")
+        update(0.85, "Making the background (first time for this theme, about 15 seconds)...")
+        c0, c1 = quiz.THEMES[theme]["bg"]
         tmp = os.path.join(LINKS, "making_background.mp4")
         subprocess.run([FFMPEG, "-y", "-v", "error", "-f", "lavfi", "-i",
-                        f"gradients=s=360x640:r=30:d={QUIZ_BG_SECONDS}:n=2:c0=0x0F5560:c1=0x2A1450:"
-                        "x0=0:y0=0:x1=360:y1=640:speed=0.008", "-pix_fmt", "yuv420p", "-c:v", "libx264",
+                        f"gradients=s=360x640:r=30:d={QUIZ_BG_SECONDS}:n=2:c0=0x{c0}:c1=0x{c1}:"
+                        "x0=0:y0=0:x1=360:y1=640:speed=0.01", "-pix_fmt", "yuv420p", "-c:v", "libx264",
                         "-preset", "veryfast", "-crf", "24", tmp], check=True)
         os.replace(tmp, path)
-    if not os.path.exists(os.path.join(LINKS, QUIZ_BG_ID + ".json")):
-        save_media_meta(QUIZ_BG_ID, path, "Quiz background")
-    return QUIZ_BG_ID
+    if not os.path.exists(os.path.join(LINKS, bg_id + ".json")):
+        save_media_meta(bg_id, path, f"Quiz background ({quiz.THEMES[theme]['name']})")
+    return bg_id
 
 
 def eleven_key():
@@ -941,18 +944,21 @@ def quiz_make(update, body):
             continue
         update(0.1 + 0.7 * n / len(said), f"Recording the voice ({n + 1} of {len(said)})...")
         voice_lines[key_] = speak_line(text, voice, body.get("rate") or "+0%")
-    bg = quiz_background(update)
+    theme = quiz.pick_theme(body.get("topic"), body.get("theme"))
+    bg = quiz_background(theme, update)
     have = lambda rel: rel if os.path.exists(os.path.join(SOUNDS, rel)) else None
-    sfx = {"tick": have("starter/sfx/click.wav"), "ding": have("starter/sfx/ding.wav"),
-           "whoosh": have("starter/sfx/whoosh.wav"), "pop": have("starter/sfx/pop.wav")}
+    sfx = {name_: have(f"starter/sfx/{file}") for name_, file in (
+        ("tick", "quiz_tick.wav"), ("correct", "quiz_correct.wav"), ("wrong", "quiz_wrong.wav"),
+        ("riser", "quiz_riser.wav"), ("whoosh", "whoosh.wav"), ("pop", "pop.wav"), ("boom", "boom.wav"))}
     music = body.get("music")
     music = have(music) if music else None
     name = (body.get("name") or quiz.TYPES[kind]["title"].title())[:80]
-    p = quiz.build(kind, questions, body.get("hook") or "", voice_lines, sfx, music, bg, QUIZ_BG_SECONDS, name)
+    p = quiz.build(kind, questions, body.get("hook") or "", voice_lines, sfx, music, bg, QUIZ_BG_SECONDS, name,
+                   theme)
     os.makedirs(PROJECTS, exist_ok=True)
     with open(project_path(p["id"]), "w") as f:
         json.dump(p, f)
-    return {"project": p["id"], "seconds": round(editor.duration(p), 1)}
+    return {"project": p["id"], "seconds": round(editor.duration(p), 1), "theme": quiz.THEMES[theme]["name"]}
 
 
 @app.post("/api/quiz/write")

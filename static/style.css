@@ -198,3 +198,7 @@ a { color: var(--teal); }
 .qz-line .todo { color: var(--muted); }
 .qz-line button { padding: 6px 12px; }
 .qz-line.live button.rec { background: #EF4444; color: #fff; }
+.ed-flash { position: absolute; inset: 0; pointer-events: none; opacity: 0; }
+.ed-block.effect { background: rgba(255, 230, 0, .25); border-color: rgba(255, 230, 0, .6); }
+#edLaneEffects { height: 36px; }
+#edTexts { position: absolute; inset: 0; transform-origin: 50% 50%; }

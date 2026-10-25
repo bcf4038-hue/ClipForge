@@ -32,7 +32,7 @@ Doors, Pet Simulator 99, Tower of Hell, Murder Mystery 2, Arsenal, Jailbreak, Na
 Grow a Garden and similar) are safest.
 - Set "sure" to false for any question whose answer you are not certain of, especially anything about \
 recent updates, exact dates or player counts. The creator checks those by hand.
-- Mix easy and hard questions; start with an easy one so viewers keep watching.
+- Order the questions from easiest to hardest. The first is easy so viewers keep watching; the last is genuinely hard (the video calls it IMPOSSIBLE).
 - Spoken text is read aloud by a text-to-speech voice: plain words, no emojis, no hashtags, no stage directions.
 - Never repeat a game as an answer in the same quiz."""
 
@@ -66,8 +66,8 @@ def schema(kind):
     item = {"type": "object", "additionalProperties": False, "properties": _QUESTION_SCHEMAS[kind],
             "required": list(_QUESTION_SCHEMAS[kind])}
     return {"type": "object", "additionalProperties": False,
-            "properties": {"hook": {"type": "string", "description": "Opening line read aloud, under 10 words, e.g. "
-                                                                     "'Only real Roblox fans get all of these!'"},
+            "properties": {"hook": {"type": "string", "description": "Opening challenge read aloud in the first 2 seconds, under 9 words, e.g. "
+                                                                     "'Only 1 percent of Roblox players get all of these!'"},
                            "questions": {"type": "array", "items": item}},
             "required": ["hook", "questions"]}
 
@@ -117,9 +117,62 @@ def lines(kind, questions, hook, count):
     return out
 
 
+# ---------- looks ----------
+# Every theme keeps the RoRush feel (same fonts, layout and branding) and changes the colors,
+# background and sounds. "bg" is the two gradient colors of the moving background.
+THEMES = {
+    "rorush": {"name": "RoRush (orange + teal)", "bg": ("0F5560", "2A1450"), "accent": "#FF7A1A",
+               "box": "#FF7A1A", "hl": "#19C3B5", "timer": "#FFE600"},
+    "neon": {"name": "Neon", "bg": ("1B0B3A", "0B4F6C"), "accent": "#FF2EC4", "box": "#7C3AED",
+             "hl": "#22D3EE", "timer": "#22D3EE"},
+    "horror": {"name": "Horror", "bg": ("2A0505", "050505"), "accent": "#EF4444", "box": "#B91C1C",
+               "hl": "#7F1D1D", "timer": "#F87171", "boom": True},
+    "candy": {"name": "Candy", "bg": ("C2367A", "5B3FD1"), "accent": "#FFE600", "box": "#FF4FA3",
+              "hl": "#7C5CFF", "timer": "#FFE600"},
+    "gold": {"name": "Gold", "bg": ("1C1406", "5A3E0A"), "accent": "#FFC83D", "box": "#B8860B",
+             "hl": "#8A6512", "timer": "#FFC83D"},
+    "ice": {"name": "Ice", "bg": ("0B3A5C", "3C8DBC"), "accent": "#7DD3FC", "box": "#0EA5E9",
+            "hl": "#0369A1", "timer": "#E0F2FE"},
+    "toxic": {"name": "Toxic", "bg": ("0A1F0A", "2F5D12"), "accent": "#A3E635", "box": "#4D7C0F",
+              "hl": "#365314", "timer": "#D9F99D"},
+    "sunset": {"name": "Sunset", "bg": ("C2410C", "4C1D5C"), "accent": "#FFE600", "box": "#E11D48",
+               "hl": "#9D174D", "timer": "#FFE600"},
+}
+# Topic words that pick a theme automatically.
+THEME_WORDS = {
+    "horror": ("horror", "scary", "doors", "pressure", "piggy", "evade", "creepy", "dead", "zombie", "halloween"),
+    "candy": ("pet", "simulator", "adopt", "cute", "brookhaven", "royale high", "dress"),
+    "gold": ("rich", "money", "rare", "expensive", "robux", "limited", "legendary", "best"),
+    "ice": ("winter", "christmas", "snow", "ice", "cold"),
+    "toxic": ("hard", "impossible", "obby", "tower", "parkour"),
+    "neon": ("anime", "fight", "blox fruits", "combat", "pvp", "battle", "arsenal"),
+    "sunset": ("old", "history", "classic", "nostalgia", "first"),
+}
+
+
+def pick_theme(topic, choice=None):
+    import random
+    if choice in THEMES:
+        return choice
+    words = (topic or "").lower()
+    for theme, keys in THEME_WORDS.items():
+        if any(k in words for k in keys):
+            return theme
+    return random.choice(list(THEMES))
+
+
+def difficulty(i, count):
+    """EASY -> MEDIUM -> HARD, and the last one is IMPOSSIBLE (questions come easiest first)."""
+    if count >= 4 and i == count:
+        return "IMPOSSIBLE", "#EF4444"
+    f = (i - 1) / max(count - 1, 1)
+    return ("EASY", "#22C55E") if f < 0.34 else ("MEDIUM", "#EAB308") if f < 0.67 else ("HARD", "#F97316")
+
+
 # ---------- the Editor project ----------
 
-ORANGE, TEAL, YELLOW, GREEN, RED = "#FF7A1A", "#19C3B5", "#FFE600", "#22C55E", "#EF4444"
+GREEN, RED, DARK = "#22C55E", "#EF4444", "#0D1B20"
+BAR_W = 760  # progress and timer bar width in pixels (frame is 1080 wide)
 
 
 def _text(text, start, end, y, **look):
@@ -129,18 +182,26 @@ def _text(text, start, end, y, **look):
     return t
 
 
+def _bar(start, end, y, width, height, color, x=0.5, anim="none"):
+    return _text("", start, end, y, shape="bar", bar_w=round(width), bar_h=height, color=color, outline=0,
+                 x=round(x, 4), anim=anim)
+
+
 def _wrap(text, width):
     return "\n".join(textwrap.wrap(text, width)) or text
 
 
-def build(kind, questions, hook, voice, sfx, music, bg_media, bg_duration, name):
+def build(kind, questions, hook, voice, sfx, music, bg_media, bg_duration, name, theme="rorush"):
     """Lay the quiz out on a timeline.
 
-    voice: {line key: (sound path, seconds)}; sfx: {"tick", "ding", "whoosh", "pop": sound path or None}.
+    voice: {line key: (sound path, seconds)}; sfx: {name: sound path or None} for tick, correct, wrong,
+    whoosh, pop, boom and riser.
     """
+    th = THEMES.get(theme) or THEMES["rorush"]
     p = new_project()
     p["name"] = name
-    texts, sounds = p["texts"], p["sounds"]
+    p["effects"] = []
+    texts, sounds, effects = p["texts"], p["sounds"], p["effects"]
 
     def say(key, at):
         path, secs = voice[key]
@@ -149,76 +210,109 @@ def build(kind, questions, hook, voice, sfx, music, bg_media, bg_duration, name)
 
     def fx(name_, at, volume=0.7):
         if sfx.get(name_):
-            sounds.append({"id": new_id(), "sound": sfx[name_], "start": round(at, 3), "volume": volume})
+            sounds.append({"id": new_id(), "sound": sfx[name_], "start": round(max(at, 0), 3), "volume": volume})
+
+    def effect(type_, at, color=None):
+        effects.append({"id": new_id(), "type": type_, "start": round(at, 3), **({"color": color} if color else {})})
 
     count = len(questions)
-    # Intro: the hook.
-    hook_len = max(2.2, voice["hook"][1] + 0.4)
-    fx("pop", 0.0)
-    texts.append(_text(_wrap(TYPES[kind]["title"], 16), 0, hook_len, 0.36, size=96, color="#FFFFFF",
-                       outline=10, anim="pop"))
-    texts.append(_text(f"CAN YOU GET ALL {count}?", 0.4, hook_len, 0.56, size=72, color="#0D1B20", box=True,
-                       box_color=YELLOW, box_opacity=1, anim="pop"))
-    say("hook", 0.15)
+    # Hook: straight into a challenge, with a hit, so people stop scrolling in the first second.
+    hook_len = max(1.8, voice["hook"][1] + 0.35)
+    fx("boom" if th.get("boom") else "pop", 0.0, 0.8)
+    effect("punch", 0.0)
+    effect("flash", 0.0, th["accent"])
+    texts.append(_text(_wrap(hook.strip().upper() or f"CAN YOU GET ALL {count}?", 14), 0, hook_len, 0.4, size=104,
+                       color="#FFFFFF", outline=12, anim="pop"))
+    if count >= 4:
+        texts.append(_text(f"WAIT FOR #{count} 😱", 0.45, hook_len, 0.58, size=64, color=DARK, box=True,
+                           box_color=th["accent"], box_opacity=1, anim="pop"))
+    say("hook", 0.1)
     t = hook_len
 
     for i, q in enumerate(questions, 1):
+        if i == count and count >= 4:
+            # Build-up before the last question.
+            fx("riser", t, 0.5)
+            effect("flash", t + 1.0, "#FFFFFF")
+            texts.append(_text("FINAL\nQUESTION 😱", t, t + 1.1, 0.42, size=120, color="#FFFFFF", outline=12,
+                               anim="pop"))
+            t += 1.1
         qs = t
-        fx("whoosh", qs, 0.6)
-        ask = say(f"q{i}", qs + 0.25)
-        timer_at = qs + 0.25 + ask + 0.25
+        fx("whoosh", qs, 0.5)
+        ask = say(f"q{i}", qs + 0.2)
+        timer_at = qs + 0.2 + ask + 0.2
         reveal = timer_at + TIMER
         ans = say(f"a{i}", reveal + 0.35)
-        end = reveal + 0.35 + ans + 0.6
-        end = max(end, reveal + 1.8)
+        end = max(reveal + 0.35 + ans + 0.5, reveal + 1.7)
 
-        texts.append(_text(f"{i}/{count}", qs, end, 0.2, size=80, color=ORANGE, outline=8))
+        # Progress, question number and difficulty.
+        texts.append(_bar(qs, end, 0.118, BAR_W, 16, "#081014", anim="none"))
+        fill = BAR_W * i / count
+        texts.append(_bar(qs, end, 0.118, fill, 16, th["accent"], x=(540 - BAR_W / 2 + fill / 2) / 1080))
+        texts.append(_text(f"QUESTION {i}/{count}", qs, end, 0.168, size=54, color="#FFFFFF", outline=7, anim="none"))
+        level, level_color = difficulty(i, count)
+        texts.append(_text(level, qs, end, 0.215, size=40, color="#FFFFFF", box=True, box_color=level_color,
+                           box_opacity=1))
+        if i == 1:
+            texts.append(_text("KEEP SCORE 👀", qs + 0.3, qs + 2.6, 0.29, size=42, color=th["timer"], outline=5,
+                               anim="fade"))
+
+        good = True
         if kind == "emoji":
-            texts.append(_text(q["emojis"], qs, end, 0.4, size=210, outline=0, uppercase=False))
-            answer = q["answer"]
-            texts.append(_text(_wrap(answer, 16), reveal, end, 0.68, size=84, color="#FFFFFF", box=True,
+            texts.append(_text(q["emojis"], qs, end, 0.42, size=220, outline=0, uppercase=False))
+            texts.append(_text(_wrap(q["answer"], 16), reveal, end, 0.66, size=88, color="#FFFFFF", box=True,
                                box_color=GREEN, box_opacity=1))
         elif kind == "truefalse":
-            texts.append(_text(_wrap(q["statement"], 18), qs, end, 0.4, size=78, color="#FFFFFF", outline=7))
-            verdict = "TRUE" if q["answer"] else "FALSE"
-            texts.append(_text(verdict, reveal, end, 0.66, size=130, color="#FFFFFF", box=True,
-                               box_color=GREEN if q["answer"] else RED, box_opacity=1))
-            texts.append(_text(_wrap(q["fact"], 24), reveal + 0.3, end, 0.78, size=56, color="#FFFFFF", outline=5,
+            good = bool(q["answer"])
+            texts.append(_text(_wrap(q["statement"], 18), qs, end, 0.42, size=78, color="#FFFFFF", outline=8))
+            texts.append(_text("TRUE" if good else "FALSE", reveal, end, 0.64, size=130, color="#FFFFFF", box=True,
+                               box_color=GREEN if good else RED, box_opacity=1))
+            texts.append(_text(_wrap(q["fact"], 24), reveal + 0.3, end, 0.75, size=56, color="#FFFFFF", outline=5,
                                anim="fade", uppercase=False))
         else:
             word = "OLDER" if q["kind"] == "older" else "MORE POPULAR"
-            texts.append(_text(f"WHICH IS {word}?", qs, end, 0.3, size=72, color=YELLOW, outline=7))
+            texts.append(_text(f"WHICH IS {word}?", qs, end, 0.3, size=72, color=th["timer"], outline=7))
             for key, y in (("a", 0.4), ("b", 0.54)):
                 texts.append(_text(_wrap(q[key], 16), qs, reveal, y, size=88, color="#FFFFFF", box=True,
-                                   box_color=TEAL, box_opacity=1))
+                                   box_color=th["hl"], box_opacity=1))
                 win = key == q["answer"]
                 texts.append(_text(_wrap(q[key], 16) + (" ✅" if win else ""), reveal, end, y, size=88,
                                    color="#FFFFFF", box=True, box_color=GREEN if win else "#3A4A50",
-                                   box_opacity=1 if win else 0.85, anim="none", uppercase=True))
-            texts.append(_text("VS", qs, end, 0.47, size=80, color=ORANGE, outline=8))
+                                   box_opacity=1 if win else 0.85, anim="none"))
+            texts.append(_text("VS", qs, end, 0.47, size=80, color=th["accent"], outline=8))
             texts.append(_text(_wrap(q["fact"], 24), reveal + 0.3, end, 0.66, size=56, color="#FFFFFF",
                                outline=5, anim="fade", uppercase=False))
-        # Countdown 3, 2, 1 with a tick each second, then the reveal sound.
+
+        # Timer: a draining bar plus 3, 2, 1 with a tick each second.
+        timer_y = 0.64 if kind == "truefalse" else 0.66
+        texts.append(_bar(timer_at, reveal, 0.755, BAR_W, 26, th["timer"], anim="drain"))
         for k in range(TIMER):
-            texts.append(_text(str(TIMER - k), timer_at + k, timer_at + k + 1, 0.68 if kind != "truefalse" else 0.66,
-                               size=190, color=YELLOW, outline=12))
+            texts.append(_text(str(TIMER - k), timer_at + k, timer_at + k + 1, timer_y, size=190, color=th["timer"],
+                               outline=12))
             fx("tick", timer_at + k, 0.8)
-        fx("ding", reveal, 0.8)
+        # Reveal: sound, zoom punch and a green (or red) flash.
+        fx("correct" if good else "wrong", reveal, 0.7 if good else 0.45)
+        effect("punch", reveal)
+        effect("flash", reveal, GREEN if good else RED)
         t = end
 
     outro = max(2.6, voice["outro"][1] + 0.8)
     fx("pop", t)
+    effect("punch", t)
     texts.append(_text("HOW MANY DID\nYOU GET? 👇", t, t + outro, 0.42, size=96, color="#FFFFFF", outline=10))
-    texts.append(_text("COMMENT YOUR SCORE", t + 0.3, t + outro, 0.56, size=60, color="#0D1B20", box=True,
-                       box_color=YELLOW, box_opacity=1))
+    texts.append(_text("COMMENT YOUR SCORE", t + 0.3, t + outro, 0.56, size=60, color=DARK, box=True,
+                       box_color=th["timer"], box_opacity=1))
     say("outro", t + 0.2)
     t += outro
 
-    texts.insert(0, _text(TYPES[kind]["header"], hook_len, t, 0.09, size=66, color="#FFFFFF", box=True,
-                          box_color=ORANGE, box_opacity=1, anim="none"))
+    # Branding that stays the same on every theme.
+    texts.insert(0, _text(TYPES[kind]["header"], 0, t, 0.07, size=62, color="#FFFFFF", box=True,
+                          box_color=th["box"], box_opacity=1, anim="none"))
+    texts.append(_text("RORUSH CLIPS", 0, t, 0.835, size=32, color=th["accent"], outline=4, anim="none"))
     total = round(min(t, bg_duration), 3)
     p["clips"] = [{"id": new_id(), "media": bg_media, "in": 0, "out": total, "volume": 0, "audio": "mute",
                    "framing": "fill", "media_duration": bg_duration}]
     if music:
         p["music"] = {"sound": music, "volume": 0.12}
+    p["theme"] = theme
     return p
